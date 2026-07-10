@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wobbleton — Tower Workshop</title>
+<style>
+  :root{
+    --ink:#2e2440;          /* plum-navy panels */
+    --ink-soft:#3d3255;
+    --paper:#fff7ec;        /* warm paper text on dark */
+    --honey:#f5b85c;        /* primary accent */
+    --mint:#9fe3c0;
+    --blush:#f4a6b0;
+    --sky:#cdd7f7;
+    --shadow: 0 10px 24px rgba(46,36,64,.35);
+    --r: 18px;
+    font-size: 16px;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;overflow:hidden;background:#b7c4ef;}
+  body{font-family: ui-rounded, "Hiragino Maru Gothic ProN", "Arial Rounded MT Bold", "Trebuchet MS", Verdana, sans-serif; color:var(--paper);}
+  #scene{position:fixed;inset:0;display:block;cursor:grab;}
+  #scene.building{cursor:crosshair;}
+  #scene.dragging{cursor:grabbing;}
+
+  /* ---------- chips & panels ---------- */
+  .chip{
+    background:var(--ink); border-radius:var(--r); box-shadow:var(--shadow);
+    padding:.6rem .95rem;
+  }
+  #title{
+    position:fixed; top:14px; left:14px; display:flex; align-items:center; gap:.6rem;
+    user-select:none;
+  }
+  #title .logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(145deg,var(--honey),#e78f4e);
+    display:grid;place-items:center;font-size:19px; box-shadow: inset 0 -3px 0 rgba(0,0,0,.18);}
+  #title h1{font-size:1.02rem;margin:0;letter-spacing:.02em;}
+  #title small{display:block;font-weight:400;opacity:.66;font-size:.72rem;}
+
+  #stats{
+    position:fixed; top:14px; right:14px; display:flex; gap:8px; align-items:center;
+  }
+  #stats .chip{display:flex;gap:.9rem;font-size:.82rem;}
+  #stats b{color:var(--honey);font-size:1rem;}
+  .iconbtn{
+    width:42px;height:42px;border:none;border-radius:14px;background:var(--ink);color:var(--paper);
+    box-shadow:var(--shadow);font-size:19px;cursor:pointer;transition:transform .12s ease;
+  }
+  .iconbtn:hover{transform:translateY(-2px);}
+  .iconbtn:focus-visible{outline:3px solid var(--honey);outline-offset:2px;}
+  .iconbtn[aria-pressed="true"]{background:var(--honey);color:var(--ink);}
+
+  /* ---------- workbench (bottom) ---------- */
+  #bench{
+    position:fixed; left:50%; bottom:14px; transform:translateX(-50%);
+    background:var(--ink); border-radius:22px; box-shadow:var(--shadow);
+    padding:10px 12px; display:flex; align-items:center; gap:10px; max-width:min(96vw,720px);
+    flex-wrap:wrap; justify-content:center;
+  }
+  #bench::before{ /* wooden shelf lip */
+    content:""; position:absolute; left:14px; right:14px; bottom:-6px; height:10px;
+    background:#8a5a3b; border-radius:8px; z-index:-1;
+  }
+  .mat{
+    border:none; cursor:pointer; width:56px; padding:6px 4px 7px; border-radius:14px;
+    background:var(--ink-soft); color:var(--paper); display:flex; flex-direction:column; align-items:center; gap:4px;
+    transition:transform .12s ease, background .12s;
+  }
+  .mat .cube{width:26px;height:26px;border-radius:7px; box-shadow: inset 0 -5px 0 rgba(0,0,0,.22), inset 0 3px 0 rgba(255,255,255,.28);}
+  .mat span{font-size:.62rem;opacity:.85;}
+  .mat:hover{transform:translateY(-3px);}
+  .mat[aria-pressed="true"]{background:var(--honey);color:var(--ink);}
+  .mat:focus-visible{outline:3px solid var(--honey);outline-offset:2px;}
+  .divider{width:2px;height:44px;background:rgba(255,255,255,.12);border-radius:2px;}
+  select{
+    border:none;border-radius:12px;background:var(--ink-soft);color:var(--paper);
+    padding:.55rem .6rem;font:inherit;font-size:.78rem;cursor:pointer;
+  }
+  select:focus-visible{outline:3px solid var(--honey);}
+
+  /* ---------- weather charms (right) — the calamity rack ---------- */
+  #charms{
+    position:fixed; right:14px; top:50%; transform:translateY(-50%);
+    display:flex; flex-direction:column; align-items:flex-end; gap:9px;
+  }
+  #charms .rack{width:8px;height:14px;border-radius:4px;background:#8a5a3b;margin:0 24px 0 0;}
+  .charm{
+    display:flex;align-items:center;gap:.55rem;border:none;cursor:pointer;
+    background:var(--ink);color:var(--paper);border-radius:16px;box-shadow:var(--shadow);
+    padding:.5rem .8rem .5rem .6rem;font:inherit;font-size:.8rem;
+    transform-origin:top right; animation:sway 5s ease-in-out infinite;
+    transition:background .15s;
+  }
+  .charm:nth-child(3){animation-delay:-1.4s}
+  .charm:nth-child(4){animation-delay:-2.7s}
+  .charm:nth-child(5){animation-delay:-3.9s}
+  @keyframes sway{0%,100%{transform:rotate(1.6deg)}50%{transform:rotate(-1.6deg)}}
+  @media (prefers-reduced-motion: reduce){.charm{animation:none}}
+  .charm .em{font-size:20px;width:30px;height:30px;display:grid;place-items:center;border-radius:10px;background:var(--ink-soft);}
+  .charm:hover{background:var(--ink-soft);}
+  .charm:disabled{opacity:.45;cursor:default;}
+  .charm:focus-visible{outline:3px solid var(--honey);outline-offset:2px;}
+  #intensityBox{background:var(--ink);border-radius:16px;box-shadow:var(--shadow);padding:.55rem .8rem;font-size:.72rem;display:flex;flex-direction:column;gap:4px;align-items:stretch;}
+  #intensityBox input{accent-color:var(--honey);width:120px;}
+  #calmBtn{background:var(--mint);color:var(--ink);font-weight:700;animation:none;}
+
+  /* ---------- toast ---------- */
+  #toast{
+    position:fixed;left:50%;top:76px;transform:translateX(-50%) translateY(-16px);
+    background:var(--ink);border-radius:var(--r);box-shadow:var(--shadow);
+    padding:.8rem 1.2rem;font-size:.9rem;opacity:0;pointer-events:none;
+    transition:opacity .3s ease, transform .3s ease; text-align:center; max-width:88vw;
+  }
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+  #toast b{color:var(--honey);}
+
+  #hint{
+    position:fixed;left:50%;bottom:96px;transform:translateX(-50%);
+    font-size:.74rem;color:var(--ink);background:rgba(255,247,236,.86);
+    padding:.4rem .9rem;border-radius:999px;pointer-events:none;transition:opacity .6s;
+  }
+  @media (max-width:640px){
+    #charms{top:auto;bottom:150px;transform:none;flex-direction:row;right:8px;left:8px;justify-content:center;flex-wrap:wrap}
+    #charms .rack{display:none}
+    #hint{display:none}
+  }
+</style>
+</head>
+<body>
+<canvas id="scene" class="building"></canvas>
+
+<div id="title" class="chip">
+  <div class="logo">🏗️</div>
+  <div>
+    <h1>Wobbleton<small>tower workshop &amp; calamity range</small></h1>
+  </div>
+</div>
+
+<div id="stats">
+  <div class="chip"><span>Blocks <b id="statBlocks">0</b></span><span>Height <b id="statHeight">0</b></span></div>
+  <button id="musicBtn" class="iconbtn" aria-pressed="false" title="Play music" aria-label="Toggle music">🎵</button>
+</div>
+
+<div id="bench" role="toolbar" aria-label="Building materials">
+  <button class="mat" data-mat="straw"  aria-pressed="false"><div class="cube" style="background:#e8cf7a"></div><span>Straw</span></button>
+  <button class="mat" data-mat="wood"   aria-pressed="true"><div class="cube" style="background:#c98a54"></div><span>Wood</span></button>
+  <button class="mat" data-mat="brick"  aria-pressed="false"><div class="cube" style="background:#d96f5e"></div><span>Brick</span></button>
+  <button class="mat" data-mat="stone"  aria-pressed="false"><div class="cube" style="background:#9aa3b2"></div><span>Stone</span></button>
+  <button class="mat" data-mat="glass"  aria-pressed="false"><div class="cube" style="background:#b5e3ee"></div><span>Glass</span></button>
+  <div class="divider"></div>
+  <button class="mat" id="eraser" aria-pressed="false"><div class="cube" style="background:var(--blush);display:grid;place-items:center;font-size:14px">✕</div><span>Erase</span></button>
+  <button class="mat" id="undoBtn"><div class="cube" style="background:#8f86b8;display:grid;place-items:center;font-size:14px">↩</div><span>Undo</span></button>
+  <button class="mat" id="clearBtn"><div class="cube" style="background:#6e6490;display:grid;place-items:center;font-size:14px">🧹</div><span>Clear</span></button>
+  <div class="divider"></div>
+  <select id="presetSel" aria-label="Load a preset tower">
+    <option value="">Preset towers…</option>
+    <option value="lighthouse">Little Lighthouse</option>
+    <option value="wizard">Wobbly Wizard Spire</option>
+    <option value="castle">Castle Keep</option>
+  </select>
+</div>
+
+<div id="charms" aria-label="Disasters">
+  <div class="rack"></div>
+  <button class="charm" data-dis="quake"><span class="em">🫨</span> Earthquake</button>
+  <button class="charm" data-dis="wind"><span class="em">🌬️</span> Windstorm</button>
+  <button class="charm" data-dis="tornado"><span class="em">🌪️</span> Tornado</button>
+  <button class="charm" data-dis="meteor"><span class="em">☄️</span> Meteor</button>
+  <div id="intensityBox">
+    <label for="intensity">Ferocity</label>
+    <input id="intensity" type="range" min="0.4" max="1.6" step="0.05" value="1">
+  </div>
+  <button class="charm" id="calmBtn" hidden><span class="em">☀️</span> Calm skies</button>
+</div>
+
+<div id="toast" role="status"></div>
+<div id="hint">Click the meadow to stack blocks · drag to spin the world · scroll to zoom</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* =========================================================================
+   WOBBLETON — a cozy tower simulator
+   Architecture (single file, five modules):
+     1. World      — scene, lights, island, clouds, camera orbit
+     2. Blocks     — grid registry, materials, ghost preview, presets
+     3. Physics    — lightweight rigid-body: sleep/wake, gravity, support
+     4. Disasters  — quake / wind / tornado / meteor + particles
+     5. Life       — boxy villagers, procedural music, UI glue
+   ========================================================================= */
+(() => {
+"use strict";
+
+/* ---------------- 1. WORLD ---------------- */
+const canvas = document.getElementById("scene");
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xb7c4ef);          // lavender dusk
+scene.fog = new THREE.Fog(0xb7c4ef, 26, 60);
+
+const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
+const orbit = {theta: Math.PI*0.22, phi: Math.PI*0.34, radius: 19, target:new THREE.Vector3(0,2.4,0)};
+function applyCamera(shakeAmp=0){
+  const {theta, phi, radius, target} = orbit;
+  camera.position.set(
+    target.x + radius*Math.sin(phi)*Math.sin(theta) + (Math.random()-0.5)*shakeAmp,
+    target.y + radius*Math.cos(phi)                 + (Math.random()-0.5)*shakeAmp,
+    target.z + radius*Math.sin(phi)*Math.cos(theta) + (Math.random()-0.5)*shakeAmp
+  );
+  camera.lookAt(target);
+}
+
+scene.add(new THREE.HemisphereLight(0xfdf1de, 0x8f86b8, 0.85));
+const sun = new THREE.DirectionalLight(0xffe3b3, 1.0);
+sun.position.set(9, 14, 6);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = sun.shadow.camera.bottom = -12;
+sun.shadow.camera.right = sun.shadow.camera.top = 12;
+scene.add(sun);
+
+/* Floating meadow island */
+const island = new THREE.Group(); scene.add(island);
+function lamb(c){ return new THREE.MeshLambertMaterial({color:c}); }
+const topGrass = new THREE.Mesh(new THREE.CylinderGeometry(6.4, 6.1, 0.7, 9), lamb(0x9fce7c));
+topGrass.position.y = -0.35; topGrass.receiveShadow = true; island.add(topGrass);
+const soil = new THREE.Mesh(new THREE.CylinderGeometry(6.1, 3.4, 2.6, 9), lamb(0x8a5a3b));
+soil.position.y = -2.0; island.add(soil);
+const soilTip = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 0.7, 2.2, 9), lamb(0x74492e));
+soilTip.position.y = -4.4; island.add(soilTip);
+
+/* Tiny props: trees, flowers, pebbles around the rim */
+function tree(x, z, s=1){
+  const g = new THREE.Group();
+  const trunk = new THREE.Mesh(new THREE.BoxGeometry(0.24*s, 0.7*s, 0.24*s), lamb(0x8a5a3b));
+  trunk.position.y = 0.35*s; trunk.castShadow = true; g.add(trunk);
+  const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.85*s, 0.85*s, 0.85*s), lamb(0x76b56a));
+  leaf.position.y = 1.0*s; leaf.rotation.y = Math.random(); leaf.castShadow = true; g.add(leaf);
+  const leaf2 = new THREE.Mesh(new THREE.BoxGeometry(0.5*s, 0.5*s, 0.5*s), lamb(0x8ecb7f));
+  leaf2.position.y = 1.5*s; leaf2.rotation.y = Math.random(); leaf2.castShadow = true; g.add(leaf2);
+  g.position.set(x, 0, z); island.add(g); return g;
+}
+tree(5.2, 1.2, 1.1); tree(-5.0, -2.0, 0.9); tree(-4.4, 3.6, 1.25); tree(2.2, -5.2, 0.85);
+for(let i=0;i<14;i++){
+  const a = Math.random()*Math.PI*2, r = 4.4 + Math.random()*1.4;
+  const f = new THREE.Mesh(new THREE.BoxGeometry(0.14,0.14,0.14),
+     lamb([0xf4a6b0,0xf5b85c,0xffffff,0xb9a6f4][i%4]));
+  f.position.set(Math.cos(a)*r, 0.07, Math.sin(a)*r); island.add(f);
+}
+
+/* Drifting clouds */
+const clouds = [];
+for(let i=0;i<6;i++){
+  const c = new THREE.Group();
+  for(let j=0;j<3;j++){
+    const puff = new THREE.Mesh(new THREE.BoxGeometry(1.4-0.3*j, 0.7, 1.0),
+      new THREE.MeshLambertMaterial({color:0xffffff, transparent:true, opacity:0.92}));
+    puff.position.set(j*0.9-0.9, j*0.18, (Math.random()-0.5)*0.4); c.add(puff);
+  }
+  c.position.set((Math.random()-0.5)*36, 7+Math.random()*5, (Math.random()-0.5)*36);
+  c.userData.speed = 0.15 + Math.random()*0.25;
+  scene.add(c); clouds.push(c);
+}
+
+/* ---------------- 2. BLOCKS ---------------- */
+const MATS = {
+  straw:{color:0xe8cf7a, mass:0.4, grip:0.55, name:"Straw"},
+  wood: {color:0xc98a54, mass:1.0, grip:1.0,  name:"Wood"},
+  brick:{color:0xd96f5e, mass:1.6, grip:1.5,  name:"Brick"},
+  stone:{color:0x9aa3b2, mass:2.4, grip:2.2,  name:"Stone"},
+  glass:{color:0xb5e3ee, mass:0.9, grip:0.7,  name:"Glass", fragile:true},
+};
+for(const k in MATS){
+  MATS[k].material = new THREE.MeshLambertMaterial({
+    color:MATS[k].color, transparent:k==="glass", opacity:k==="glass"?0.65:1
+  });
+}
+const GRID = 7, HALF = (GRID-1)/2, MAXY = 14;
+const blockGeo = new THREE.BoxGeometry(0.96, 0.96, 0.96);
+const blocks = [];                 // every block object (sleeping, awake, settled)
+const cellMap = new Map();         // "gx,gy,gz" -> block (sleeping only)
+const key = (x,y,z)=>`${x},${y},${z}`;
+const undoStack = [];
+
+function addBlock(gx, gy, gz, matName, silent){
+  if(gx<0||gx>=GRID||gz<0||gz>=GRID||gy<0||gy>=MAXY) return null;
+  if(cellMap.has(key(gx,gy,gz))) return null;
+  const m = MATS[matName];
+  const mesh = new THREE.Mesh(blockGeo, m.material.clone());
+  mesh.castShadow = mesh.receiveShadow = true;
+  mesh.position.set(gx-HALF, gy+0.5, gz-HALF);
+  scene.add(mesh);
+  const b = {gx,gy,gz, mat:matName, mesh, state:"sleep",
+             vel:new THREE.Vector3(), ang:new THREE.Vector3()};
+  blocks.push(b); cellMap.set(key(gx,gy,gz), b);
+  if(!silent){ undoStack.push(b); popIn(mesh); playPlop(); }
+  refreshStats();
+  return b;
+}
+function removeBlock(b){
+  cellMap.delete(key(b.gx,b.gy,b.gz));
+  scene.remove(b.mesh);
+  const i = blocks.indexOf(b); if(i>=0) blocks.splice(i,1);
+  refreshStats();
+}
+function popIn(mesh){ mesh.scale.setScalar(0.2); mesh.userData.pop = 1; }
+
+function refreshStats(){
+  const standing = blocks.filter(b=>b.state==="sleep");
+  document.getElementById("statBlocks").textContent = standing.length;
+  const h = standing.reduce((m,b)=>Math.max(m,b.gy+1), 0);
+  document.getElementById("statHeight").textContent = h;
+}
+
+/* Ghost preview cube */
+const ghost = new THREE.Mesh(blockGeo, new THREE.MeshLambertMaterial({
+  color:0xffffff, transparent:true, opacity:0.35}));
+ghost.visible = false; scene.add(ghost);
+
+/* Presets */
+const PRESETS = {
+  lighthouse(){
+    const out=[];
+    for(let x=2;x<=4;x++)for(let z=2;z<=4;z++)for(let y=0;y<2;y++) out.push([x,y,z,"stone"]);
+    for(let x=2;x<=4;x++)for(let z=2;z<=4;z++)for(let y=2;y<6;y++) out.push([x,y,z,"brick"]);
+    for(let x=2;x<=4;x++)for(let z=2;z<=4;z++) out.push([x,6,z,"glass"]);
+    out.push([3,7,3,"wood"]);
+    return out;
+  },
+  wizard(){
+    const out=[];
+    for(let x=2;x<=3;x++)for(let z=3;z<=4;z++)for(let y=0;y<5;y++) out.push([x,y,z,"wood"]);
+    for(let x=2;x<=3;x++)for(let z=3;z<=4;z++) out.push([x,5,z,"glass"]);
+    out.push([2,6,3,"straw"],[3,6,4,"straw"],[2,6,4,"straw"],[3,6,3,"straw"],[2,7,3,"straw"]);
+    return out;
+  },
+  castle(){
+    const out=[];
+    for(let x=1;x<=5;x++)for(let z=1;z<=5;z++){
+      const wall = (x===1||x===5||z===1||z===5);
+      const corner = (x===1||x===5)&&(z===1||z===5);
+      if(!wall) continue;
+      const h = corner?5:3;
+      for(let y=0;y<h;y++){
+        if(x===3&&z===5&&y<2){ out.push([x,y,z,"wood"]); continue; } // gate
+        out.push([x,y,z,"stone"]);
+      }
+      if(corner) out.push([x,5,z,"brick"]);
+    }
+    return out;
+  }
+};
+function loadPreset(name){
+  clearAll();
+  for(const [x,y,z,m] of PRESETS[name]()) addBlock(x,y,z,m,true);
+  blocks.forEach(b=>popIn(b.mesh));
+  toast(`Loaded <b>${{lighthouse:"Little Lighthouse",wizard:"Wobbly Wizard Spire",castle:"Castle Keep"}[name]}</b> — give it a shake!`);
+}
+function clearAll(){
+  [...blocks].forEach(removeBlock);
+  undoStack.length = 0;
+}
+
+/* ---------------- 3. PHYSICS ----------------
+   A cozy-sized rigid body sim. Blocks "sleep" (locked to the grid) until a
+   force beats their grip. Grip = material stickiness × (1 + weight pressing
+   down from above) — that's static friction, in toy form. Awake blocks get
+   gravity, velocity, tumbling, a soft floor bounce and pushes off each other.
+------------------------------------------------ */
+const GRAV = -14;
+function loadAbove(b){
+  let m = 0;
+  for(let y=b.gy+1;y<MAXY;y++){
+    const o = cellMap.get(key(b.gx,y,b.gz));
+    if(!o) break; m += MATS[o.mat].mass;
+  }
+  return m;
+}
+function gripOf(b){ return MATS[b.mat].grip * (1 + 0.35*loadAbove(b)); }
+function wake(b, vx=0, vy=0, vz=0){
+  if(b.state!=="sleep") return;
+  cellMap.delete(key(b.gx,b.gy,b.gz));
+  b.state = "awake";
+  b.vel.set(vx, vy, vz);
+  b.ang.set((Math.random()-.5)*3, (Math.random()-.5)*3, (Math.random()-.5)*3);
+}
+function supportPass(){ // any sleeping block with nothing under it wakes up
+  let changed = true;
+  while(changed){
+    changed = false;
+    for(const b of blocks){
+      if(b.state!=="sleep" || b.gy===0) continue;
+      if(!cellMap.has(key(b.gx, b.gy-1, b.gz))){
+        wake(b, (Math.random()-.5)*0.6, 0, (Math.random()-.5)*0.6);
+        changed = true;
+      }
+    }
+  }
+}
+function stepPhysics(dt){
+  supportPass();
+  const awake = blocks.filter(b=>b.state==="awake");
+  for(const b of awake){
+    b.vel.y += GRAV*dt;
+    b.mesh.position.addScaledVector(b.vel, dt);
+    b.mesh.rotation.x += b.ang.x*dt; b.mesh.rotation.y += b.ang.y*dt; b.mesh.rotation.z += b.ang.z*dt;
+    // floor — but only while still over the island
+    const hr = Math.hypot(b.mesh.position.x, b.mesh.position.z);
+    if(hr < 6.2 && b.mesh.position.y < 0.48){
+      const impact = -b.vel.y;
+      b.mesh.position.y = 0.48;
+      if(MATS[b.mat].fragile && impact > 5){ shatter(b); continue; }
+      b.vel.y = impact*0.22;
+      b.vel.x *= 0.78; b.vel.z *= 0.78;
+      b.ang.multiplyScalar(0.6);
+      if(b.vel.length() < 0.35){ b.state="settled"; b.vel.set(0,0,0); b.ang.set(0,0,0); playThud(); }
+    }
+    // slid past the meadow's edge → tumble into the sky-sea
+    if(hr >= 6.2) b.state = "falling";
+  }
+  // awake/falling vs everything: soft sphere pushes (cheap but convincing)
+  const movers = blocks.filter(b=>b.state==="awake"||b.state==="falling");
+  for(const a of movers){
+    for(const b of blocks){
+      if(a===b) continue;
+      const d = new THREE.Vector3().subVectors(a.mesh.position, b.mesh.position);
+      const dist = d.length();
+      if(dist > 0.001 && dist < 0.95){
+        d.normalize();
+        const push = (0.95-dist);
+        a.mesh.position.addScaledVector(d, push*0.55);
+        a.vel.addScaledVector(d, push*7);
+        if(b.state==="sleep" && a.vel.length()*MATS[a.mat].mass > gripOf(b)*2.4){
+          wake(b, d.x*-1.4, 0.6, d.z*-1.4);   // knocked loose by flying debris
+        }
+        if(MATS[a.mat].fragile && a.vel.length() > 5.5){ shatter(a); break; }
+      }
+    }
+  }
+  // remove far-fallen blocks
+  for(const b of [...blocks]){
+    if(b.state==="falling"){
+      b.vel.y += GRAV*dt;
+      b.mesh.position.addScaledVector(b.vel, dt);
+      b.mesh.rotation.x += 2*dt; b.mesh.rotation.z += 2*dt;
+      if(b.mesh.position.y < -20) removeBlock(b);
+    }
+  }
+}
+
+/* ---------------- particles ---------------- */
+const particles = [];
+const pGeo = new THREE.BoxGeometry(0.16,0.16,0.16);
+function spawnParticles(pos, color, n, spread=4, up=4){
+  for(let i=0;i<n;i++){
+    const p = new THREE.Mesh(pGeo, new THREE.MeshLambertMaterial({color}));
+    p.position.copy(pos);
+    p.userData = {vel:new THREE.Vector3((Math.random()-.5)*spread, Math.random()*up, (Math.random()-.5)*spread), life:1};
+    scene.add(p); particles.push(p);
+  }
+}
+function shatter(b){
+  spawnParticles(b.mesh.position, 0xd7f2f8, 12, 5, 5);
+  playShatter();
+  removeBlock(b);
+}
+function stepParticles(dt){
+  for(let i=particles.length-1;i>=0;i--){
+    const p = particles[i], u = p.userData;
+    u.vel.y += GRAV*0.6*dt;
+    p.position.addScaledVector(u.vel, dt);
+    p.rotation.x += 4*dt; p.rotation.y += 4*dt;
+    u.life -= dt*0.8;
+    p.scale.setScalar(Math.max(0.01,u.life));
+    if(u.life<=0 || p.position.y<-15){ scene.remove(p); particles.splice(i,1); }
+  }
+}
+
+/* ---------------- 4. DISASTERS ---------------- */
+let disaster = null;   // {type, t, dur, intensity, ...}
+let preCount = 0;
+const intensityEl = document.getElementById("intensity");
+
+const funnel = new THREE.Mesh(
+  new THREE.ConeGeometry(2.1, 7, 10, 1, true),
+  new THREE.MeshLambertMaterial({color:0xd9d3ea, transparent:true, opacity:0.5, side:THREE.DoubleSide}));
+funnel.position.y = 3.5; funnel.rotation.x = Math.PI; funnel.visible = false; scene.add(funnel);
+
+const meteorMesh = new THREE.Mesh(new THREE.DodecahedronGeometry(0.55),
+  new THREE.MeshLambertMaterial({color:0x7a4a3a, emissive:0xff5a2a, emissiveIntensity:0.7}));
+meteorMesh.visible = false; scene.add(meteorMesh);
+
+function startDisaster(type){
+  if(disaster) return;
+  preCount = blocks.filter(b=>b.state==="sleep").length;
+  if(preCount===0){ toast("Build something first — the sky is politely waiting."); return; }
+  const I = parseFloat(intensityEl.value);
+  disaster = {type, t:0, dur: type==="meteor"?12:9, intensity:I};
+  if(type==="tornado"){
+    funnel.visible = true;
+    disaster.center = new THREE.Vector2(-6, -6);
+  }
+  if(type==="meteor"){
+    disaster.hits = 0;
+    scheduleMeteor(disaster);
+  }
+  villagers.forEach(v=>v.panic=true);
+  document.querySelectorAll(".charm[data-dis]").forEach(b=>b.disabled=true);
+  document.getElementById("calmBtn").hidden = false;
+  canvas.classList.remove("building");
+  setRumble(type==="wind"?0:0.5, type==="wind"||type==="tornado"?0.6:0.1);
+  toast({quake:"🫨 The ground grumbles awake…", wind:"🌬️ A big wind clears its throat…",
+         tornado:"🌪️ A twisty visitor drops by…", meteor:"☄️ Something is falling out of the sky!"}[type]);
+}
+function scheduleMeteor(d){
+  const tx = (Math.random()*GRID|0)-HALF, tz = (Math.random()*GRID|0)-HALF;
+  d.meteor = {pos:new THREE.Vector3(tx+8, 16, tz-8), vel:new THREE.Vector3(-6.2,-11,6.2).multiplyScalar(0.9+0.3*d.intensity), target:new THREE.Vector3(tx,0.5,tz)};
+  meteorMesh.visible = true;
+}
+function endDisaster(){
+  if(!disaster) return;
+  const type = disaster.type;
+  disaster = null;
+  funnel.visible = false; meteorMesh.visible = false;
+  island.position.set(0,0,0);
+  for(const b of blocks) if(b.state==="sleep") b.mesh.position.set(b.gx-HALF, b.gy+0.5, b.gz-HALF);
+  villagers.forEach(v=>v.panic=false);
+  setRumble(0,0);
+  document.getElementById("calmBtn").hidden = true;
+  canvas.classList.add("building");
+  // let rubble settle, then report
+  setTimeout(()=>{
+    document.querySelectorAll(".charm[data-dis]").forEach(b=>b.disabled=false);
+    const standing = blocks.filter(b=>b.state==="sleep").length;
+    const pct = preCount? Math.round(standing/preCount*100) : 0;
+    refreshStats();
+    if(pct>=70){
+      toast(`☀️ Calm again. <b>${pct}%</b> of your tower stood proud — sturdy work!`);
+      confetti();
+      playChime(true);
+    } else if(pct>=30){
+      toast(`☀️ Calm again. <b>${pct}%</b> survived. A wobble, not a tragedy.`);
+      playChime(false);
+    } else {
+      toast(`☀️ Calm again. <b>${pct}%</b> survived… the villagers suggest more stone.`);
+      playChime(false);
+    }
+  }, 1800);
+}
+function confetti(){
+  for(let i=0;i<3;i++){
+    setTimeout(()=>spawnParticles(new THREE.Vector3((Math.random()-.5)*4, 6+Math.random()*2, (Math.random()-.5)*4),
+      [0xf5b85c,0x9fe3c0,0xf4a6b0][i], 14, 3, 1), i*160);
+  }
+}
+
+let shakeAmp = 0;
+function stepDisaster(dt){
+  if(!disaster) { shakeAmp *= 0.9; island.position.x *= 0.8; island.position.z *= 0.8; return; }
+  const d = disaster; d.t += dt;
+  const I = d.intensity;
+  const ramp = Math.min(1, d.t/1.2) * Math.min(1, (d.dur-d.t)/1.2); // ease in/out
+
+  if(d.type==="quake"){
+    const s = 0.09*I*ramp;
+    island.position.x = Math.sin(d.t*34)*s;
+    island.position.z = Math.cos(d.t*27)*s;
+    shakeAmp = 0.10*I*ramp;
+    for(const b of blocks){
+      if(b.state!=="sleep") continue;
+      b.mesh.position.x = b.gx-HALF + island.position.x;   // ride the shake
+      b.mesh.position.z = b.gz-HALF + island.position.z;
+      const jolt = I*ramp*(0.9+Math.random()*0.6)*(1 + b.gy*0.16); // whips harder up top
+      if(jolt > gripOf(b)*1.05){
+        wake(b, Math.sin(d.t*34)*2.4*I, 0.4, Math.cos(d.t*27)*2.4*I);
+      }
+    }
+  }
+  if(d.type==="wind"){
+    const gust = 0.55 + 0.45*Math.sin(d.t*1.7) * Math.sin(d.t*0.6+1);
+    setRumble(0, 0.35 + 0.4*gust*ramp);
+    for(const b of blocks){
+      if(b.state==="sleep"){
+        const sheltered = cellMap.has(key(b.gx+1, b.gy, b.gz)); // block on windward side
+        const push = I*gust*ramp*(1 + b.gy*0.13)*(sheltered?0.25:1);
+        if(push > gripOf(b)*0.95) wake(b, -3.2*I*gust, 0.5, (Math.random()-.5));
+      } else if(b.state==="awake"){
+        b.vel.x -= 5.5*I*gust*dt;   // debris sails downwind
+      }
+    }
+    for(const p of particles) p.userData.vel.x -= 3*I*gust*dt;
+  }
+  if(d.type==="tornado"){
+    // funnel wanders across the meadow
+    const c = d.center;
+    c.x += (Math.sin(d.t*0.7)*3.5 - c.x + 1.2*dt*10)*dt*0.6 + dt*1.1;
+    c.y += (Math.cos(d.t*0.5)*3.0 - c.y)*dt*0.6 + dt*0.9;
+    funnel.position.set(c.x, 3.5, c.y);
+    funnel.rotation.y += dt*9;
+    funnel.scale.setScalar(0.9+0.1*Math.sin(d.t*11));
+    shakeAmp = 0.04*I;
+    if(Math.random()<0.35) spawnParticles(new THREE.Vector3(c.x,0.3,c.y), 0xb9a988, 1, 2, 3);
+    for(const b of blocks){
+      const dx = b.mesh.position.x - c.x, dz = b.mesh.position.z - c.y;
+      const r = Math.hypot(dx,dz);
+      if(r > 3.1) continue;
+      const pull = (1 - r/3.1);
+      if(b.state==="sleep"){
+        if(I*pull*(1.6 + b.gy*0.1) > gripOf(b)){
+          wake(b, -dz/r*4*I, 3.5*I*pull, dx/r*4*I);  // fling into the swirl, upward!
+        }
+      } else if(b.state==="awake"){
+        b.vel.x += (-dz/Math.max(r,.4)*8 - dx*2) * pull * dt * I;
+        b.vel.z += ( dx/Math.max(r,.4)*8 - dz*2) * pull * dt * I;
+        b.vel.y += 9*pull*dt*I;
+      }
+    }
+  }
+  if(d.type==="meteor" && d.meteor){
+    const m = d.meteor;
+    m.pos.addScaledVector(m.vel, dt);
+    meteorMesh.position.copy(m.pos);
+    meteorMesh.rotation.x += 6*dt; meteorMesh.rotation.y += 4*dt;
+    if(Math.random()<0.7) spawnParticles(m.pos, 0xffa04a, 1, 1, 0.5);
+    // impact?
+    let boom = m.pos.y <= 0.4;
+    for(const b of blocks){
+      if(b.state!=="sleep") continue;
+      if(m.pos.distanceTo(b.mesh.position) < 0.85){ boom = true; break; }
+    }
+    if(boom){
+      playBoom(); shakeAmp = 0.5;
+      spawnParticles(m.pos, 0xff7a3a, 22, 8, 8);
+      spawnParticles(m.pos, 0x8a5a3b, 14, 6, 6);
+      for(const b of [...blocks]){
+        const dist = m.pos.distanceTo(b.mesh.position);
+        if(dist < 2.6*I){
+          const dir = new THREE.Vector3().subVectors(b.mesh.position, m.pos).normalize();
+          if(b.state==="sleep") wake(b, dir.x*8*I/(0.5+dist), 4*I/(0.5+dist), dir.z*8*I/(0.5+dist));
+          else b.vel.addScaledVector(dir, 8*I/(0.5+dist));
+          if(MATS[b.mat].fragile) shatter(b);
+        }
+      }
+      meteorMesh.visible = false; d.meteor = null;
+      d.hits++;
+      if(d.hits < Math.round(2*I) && d.t < d.dur-3) setTimeout(()=>{ if(disaster===d) scheduleMeteor(d); }, 1400);
+    }
+  }
+  shakeAmp *= 0.94;
+  if(d.t >= d.dur) endDisaster();
+}
+
+/* ---------------- 5a. VILLAGERS ---------------- */
+function faceTexture(){
+  const cv = document.createElement("canvas"); cv.width = cv.height = 64;
+  const g = cv.getContext("2d");
+  g.fillStyle = "#2e2440";
+  g.beginPath(); g.arc(20,26,4,0,7); g.arc(44,26,4,0,7); g.fill();
+  g.lineWidth = 3; g.strokeStyle = "#2e2440";
+  g.beginPath(); g.arc(32,36,7,0.15*Math.PI,0.85*Math.PI); g.stroke();
+  g.fillStyle = "rgba(244,166,176,.8)";
+  g.beginPath(); g.arc(14,36,4,0,7); g.arc(50,36,4,0,7); g.fill();
+  return new THREE.CanvasTexture(cv);
+}
+function exclaimSprite(){
+  const cv = document.createElement("canvas"); cv.width=64; cv.height=64;
+  const g = cv.getContext("2d");
+  g.fillStyle = "#f5b85c"; g.font = "bold 52px sans-serif"; g.textAlign="center";
+  g.fillText("!", 32, 50);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv), transparent:true}));
+  sp.scale.set(0.5,0.5,1); return sp;
+}
+const villagers = [];
+function makeVillager(color, x, z){
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.42,0.5,0.32), lamb(color));
+  body.position.y = 0.25; body.castShadow = true; g.add(body);
+  const headMat = [lamb(0xf7d9b8),lamb(0xf7d9b8),lamb(0xf7d9b8),lamb(0xf7d9b8),
+    new THREE.MeshLambertMaterial({color:0xf7d9b8, map:faceTexture()}), lamb(0xf7d9b8)];
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.4,0.36,0.36), headMat);
+  head.position.y = 0.68; head.castShadow = true; g.add(head);
+  const hat = new THREE.Mesh(new THREE.BoxGeometry(0.44,0.12,0.4), lamb(color));
+  hat.position.y = 0.9; g.add(hat);
+  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.1,0.3,0.1), lamb(color));
+  armL.position.set(-0.28,0.32,0); g.add(armL);
+  const armR = armL.clone(); armR.position.x = 0.28; g.add(armR);
+  const ex = exclaimSprite(); ex.position.y = 1.3; ex.visible = false; g.add(ex);
+  g.position.set(x,0,z);
+  scene.add(g);
+  const v = {g, ex, armL, armR, target:new THREE.Vector2(x,z), speed:0.7, panic:false, phase:Math.random()*9};
+  villagers.push(v); return v;
+}
+makeVillager(0x9fe3c0, 4.6, -1.5);
+makeVillager(0xf4a6b0, -4.2, 2.0);
+makeVillager(0xf5b85c, 1.0, 5.0);
+
+function stepVillagers(dt, t){
+  for(const v of villagers){
+    v.ex.visible = v.panic;
+    const p = v.g.position;
+    const d = new THREE.Vector2(v.target.x - p.x, v.target.y - p.z);
+    if(d.length() < 0.25 || Math.random() < (v.panic?0.02:0.004)){
+      // pick a new stroll target on the meadow rim, away from the build zone
+      const a = Math.random()*Math.PI*2, r = 4.2 + Math.random()*1.6;
+      v.target.set(Math.cos(a)*r, Math.sin(a)*r);
+    }
+    d.normalize();
+    const sp = v.panic ? 2.6 : v.speed;
+    p.x += d.x*sp*dt; p.z += d.y*sp*dt;
+    v.g.rotation.y = Math.atan2(d.x, d.y);
+    const bounce = v.panic ? Math.abs(Math.sin(t*16+v.phase))*0.16 : Math.abs(Math.sin(t*7+v.phase))*0.05;
+    p.y = bounce;
+    const wave = v.panic ? Math.sin(t*20+v.phase)*1.2 : Math.sin(t*7+v.phase)*0.35;
+    v.armL.rotation.x = wave; v.armR.rotation.x = -wave;
+    if(v.panic){ v.armL.rotation.z = 2.6; v.armR.rotation.z = -2.6; }
+    else { v.armL.rotation.z = 0; v.armR.rotation.z = 0; }
+  }
+}
+
+/* ---------------- 5b. MUSIC & SOUND (Web Audio, no files) ---------------- */
+let AC = null, master, musicGain, rumbleGain, windGain, musicOn = false, stepTimer = null;
+function ensureAudio(){
+  if(AC) return;
+  AC = new (window.AudioContext||window.webkitAudioContext)();
+  master = AC.createGain(); master.gain.value = 0.8; master.connect(AC.destination);
+  musicGain = AC.createGain(); musicGain.gain.value = 0; musicGain.connect(master);
+  // brown-ish noise for rumble + wind
+  const len = AC.sampleRate*2, buf = AC.createBuffer(1,len,AC.sampleRate), ch = buf.getChannelData(0);
+  let last = 0;
+  for(let i=0;i<len;i++){ const w=(Math.random()*2-1); last=(last+0.02*w)/1.02; ch[i]=last*3; }
+  const noise = AC.createBufferSource(); noise.buffer = buf; noise.loop = true;
+  const lp = AC.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value = 90;
+  rumbleGain = AC.createGain(); rumbleGain.gain.value = 0;
+  noise.connect(lp); lp.connect(rumbleGain); rumbleGain.connect(master);
+  const bp = AC.createBiquadFilter(); bp.type="bandpass"; bp.frequency.value=650; bp.Q.value=0.6;
+  windGain = AC.createGain(); windGain.gain.value = 0;
+  noise.connect(bp); bp.connect(windGain); windGain.connect(master);
+  noise.start();
+}
+function setRumble(r, w){
+  if(!AC) return;
+  rumbleGain.gain.setTargetAtTime(r*0.5, AC.currentTime, 0.4);
+  windGain.gain.setTargetAtTime(w*0.25, AC.currentTime, 0.6);
+}
+const SCALE = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25, 784.00];
+let melodyIdx = 4, step = 0;
+function pluck(freq, when, vol=0.16, dur=0.5){
+  const o = AC.createOscillator(); o.type="triangle"; o.frequency.value = freq;
+  const g = AC.createGain();
+  g.gain.setValueAtTime(0, when);
+  g.gain.linearRampToValueAtTime(vol, when+0.015);
+  g.gain.exponentialRampToValueAtTime(0.0008, when+dur);
+  o.connect(g); g.connect(musicGain);
+  o.start(when); o.stop(when+dur+0.05);
+}
+function pad(freqs, when, dur){
+  for(const f of freqs){
+    const o = AC.createOscillator(); o.type="sine"; o.frequency.value = f;
+    const g = AC.createGain();
+    g.gain.setValueAtTime(0, when);
+    g.gain.linearRampToValueAtTime(0.045, when+1.2);
+    g.gain.linearRampToValueAtTime(0, when+dur);
+    o.connect(g); g.connect(musicGain);
+    o.start(when); o.stop(when+dur+0.1);
+  }
+}
+const CHORDS = [[261.63,329.63,392.0],[220,261.63,329.63],[174.61,261.63,349.23],[196,293.66,392]];
+function musicStep(){
+  const t = AC.currentTime + 0.05;
+  if(step % 16 === 0) pad(CHORDS[(step/16)%4], t, 4.6);
+  if(step % 2 === 0 && Math.random() < 0.85){
+    melodyIdx += [-2,-1,-1,0,1,1,2][Math.random()*7|0];
+    melodyIdx = Math.max(0, Math.min(SCALE.length-1, melodyIdx));
+    pluck(SCALE[melodyIdx], t, 0.13, 0.6);
+    if(Math.random()<0.25) pluck(SCALE[melodyIdx]/2, t, 0.07, 0.9);
+  }
+  step++;
+}
+function toggleMusic(){
+  ensureAudio(); AC.resume();
+  musicOn = !musicOn;
+  const btn = document.getElementById("musicBtn");
+  btn.setAttribute("aria-pressed", musicOn);
+  btn.title = musicOn ? "Pause music" : "Play music";
+  musicGain.gain.setTargetAtTime(musicOn?1:0, AC.currentTime, 0.5);
+  if(musicOn && !stepTimer) stepTimer = setInterval(musicStep, 290);
+  if(!musicOn && stepTimer){ clearInterval(stepTimer); stepTimer = null; }
+}
+function blip(freq, vol, dur, type="sine"){
+  if(!AC) return;
+  const t = AC.currentTime;
+  const o = AC.createOscillator(); o.type=type; o.frequency.value=freq;
+  const g = AC.createGain();
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t+dur);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t+dur);
+}
+const playPlop   = ()=>blip(420+Math.random()*120, 0.12, 0.12, "sine");
+const playThud   = ()=>blip(90, 0.10, 0.15, "sine");
+const playShatter= ()=>{ blip(1900,0.06,0.2,"square"); blip(2600,0.04,0.15,"square"); };
+const playBoom   = ()=>{ blip(60,0.3,0.7,"sine"); blip(120,0.15,0.4,"sawtooth"); };
+function playChime(happy){
+  if(!AC) return;
+  const notes = happy ? [523.25,659.25,784,1046.5] : [392,329.63];
+  notes.forEach((f,i)=>setTimeout(()=>blip(f,0.12,0.5,"triangle"), i*140));
+}
+
+/* ---------------- 5c. INPUT & UI ---------------- */
+let currentMat = "wood", erasing = false;
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+let down = null, dragged = false;
+
+function pickCell(e){
+  const r = canvas.getBoundingClientRect();
+  pointer.x = ((e.clientX-r.left)/r.width)*2-1;
+  pointer.y = -((e.clientY-r.top)/r.height)*2+1;
+  raycaster.setFromCamera(pointer, camera);
+  const targets = blocks.filter(b=>b.state==="sleep").map(b=>b.mesh);
+  targets.push(topGrass);
+  const hits = raycaster.intersectObjects(targets);
+  if(!hits.length) return null;
+  const h = hits[0];
+  if(h.object === topGrass){
+    const gx = Math.round(h.point.x + HALF), gz = Math.round(h.point.z + HALF);
+    if(gx<0||gx>=GRID||gz<0||gz>=GRID) return null;
+    return {gx, gy:0, gz, block:null};
+  }
+  const b = blocks.find(bb=>bb.mesh===h.object);
+  const n = h.face.normal.clone().applyQuaternion(h.object.quaternion).round();
+  return {gx:b.gx+n.x, gy:b.gy+n.y, gz:b.gz+n.z, block:b};
+}
+canvas.addEventListener("pointerdown", e=>{
+  down = {x:e.clientX, y:e.clientY, theta:orbit.theta, phi:orbit.phi};
+  dragged = false;
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener("pointermove", e=>{
+  if(down){
+    const dx = e.clientX-down.x, dy = e.clientY-down.y;
+    if(Math.hypot(dx,dy) > 6) dragged = true;
+    if(dragged){
+      canvas.classList.add("dragging");
+      orbit.theta = down.theta - dx*0.008;
+      orbit.phi = Math.max(0.2, Math.min(1.35, down.phi - dy*0.006));
+      ghost.visible = false;
+      return;
+    }
+  }
+  if(disaster){ ghost.visible=false; return; }
+  const c = pickCell(e);
+  if(!c || erasing || c.gy>=MAXY || cellMap.has(key(c.gx,c.gy,c.gz))){ ghost.visible=false; return; }
+  ghost.visible = true;
+  ghost.material.color.set(erasing?0xf4a6b0:MATS[currentMat].color);
+  ghost.position.set(c.gx-HALF, c.gy+0.5, c.gz-HALF);
+});
+canvas.addEventListener("pointerup", e=>{
+  canvas.classList.remove("dragging");
+  const wasDrag = dragged; down = null; dragged = false;
+  if(wasDrag || disaster) return;
+  const c = pickCell(e);
+  if(!c) return;
+  ensureAudio(); AC.resume();
+  if(erasing){ if(c.block){ removeBlock(c.block); blip(300,0.08,0.1); } return; }
+  addBlock(c.gx, c.gy, c.gz, currentMat);
+  document.getElementById("hint").style.opacity = 0;
+});
+canvas.addEventListener("wheel", e=>{
+  e.preventDefault();
+  orbit.radius = Math.max(8, Math.min(34, orbit.radius + e.deltaY*0.015));
+},{passive:false});
+
+document.querySelectorAll(".mat[data-mat]").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    currentMat = btn.dataset.mat; erasing = false;
+    document.querySelectorAll(".mat[data-mat]").forEach(b=>b.setAttribute("aria-pressed", b===btn));
+    document.getElementById("eraser").setAttribute("aria-pressed","false");
+  });
+});
+document.getElementById("eraser").addEventListener("click", function(){
+  erasing = !erasing;
+  this.setAttribute("aria-pressed", erasing);
+});
+document.getElementById("undoBtn").addEventListener("click", ()=>{
+  const b = undoStack.pop();
+  if(b && blocks.includes(b) && b.state==="sleep") removeBlock(b);
+});
+document.getElementById("clearBtn").addEventListener("click", ()=>{ if(!disaster) clearAll(); });
+document.getElementById("presetSel").addEventListener("change", function(){
+  if(this.value && !disaster) loadPreset(this.value);
+  this.value = "";
+});
+document.querySelectorAll(".charm[data-dis]").forEach(btn=>{
+  btn.addEventListener("click", ()=>{ ensureAudio(); AC.resume(); startDisaster(btn.dataset.dis); });
+});
+document.getElementById("calmBtn").addEventListener("click", endDisaster);
+document.getElementById("musicBtn").addEventListener("click", toggleMusic);
+
+let toastTimer = null;
+function toast(html){
+  const t = document.getElementById("toast");
+  t.innerHTML = html; t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.classList.remove("show"), 4200);
+}
+
+/* ---------------- main loop ---------------- */
+function resize(){
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize); resize();
+
+const clock = new THREE.Clock();
+function tick(){
+  requestAnimationFrame(tick);
+  const dt = Math.min(clock.getDelta(), 0.033);
+  const t = clock.elapsedTime;
+  stepDisaster(dt);
+  stepPhysics(dt);
+  stepParticles(dt);
+  stepVillagers(dt, t);
+  for(const c of clouds){
+    c.position.x += c.userData.speed*dt;
+    if(c.position.x > 22) c.position.x = -22;
+    c.position.y += Math.sin(t*0.6 + c.position.z)*0.002;
+  }
+  // block pop-in easing
+  for(const b of blocks){
+    if(b.mesh.userData.pop){
+      b.mesh.userData.pop -= dt*3.2;
+      const s = 1 - Math.max(0, b.mesh.userData.pop);
+      b.mesh.scale.setScalar(0.2 + 0.8*(1-(1-s)*(1-s)));
+      if(b.mesh.userData.pop<=0){ b.mesh.scale.setScalar(1); b.mesh.userData.pop = 0; }
+    }
+  }
+  island.rotation.y = Math.sin(t*0.15)*0.004;  // the world breathes, very gently
+  applyCamera(shakeAmp);
+  renderer.render(scene, camera);
+}
+loadPreset("wizard");
+toast("Welcome to <b>Wobbleton</b>! Stack blocks, then pull a weather charm. 🎵 turns on the music.");
+tick();
+})();
+</script>
+</body>
+</html>
