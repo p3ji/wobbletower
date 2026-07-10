@@ -135,18 +135,18 @@
     /* Bottom Workbench dock */
     #bench {
       bottom:0; left:0; right:0; transform:none; border-radius:18px 18px 0 0;
-      padding:8px 6px 16px; gap:6px; max-width:none;
+      padding:8px 6px max(16px, env(safe-area-inset-bottom)); gap:6px; max-width:none;
     }
     #bench::before { display:none; }
     .mat { width:42px; padding:6px 2px; border-radius:12px; }
     .mat .cube { width:22px; height:22px; }
     .mat span { font-size:0.55rem; }
     .divider { height:36px; margin:0 2px; }
-    select { padding:0.4rem 0.6rem; font-size:0.75rem; flex:1 1 100%; text-align:center; }
+    select { padding:0.4rem 0.6rem; font-size:0.75rem; flex:1 1 auto; max-width:140px; text-align:center; }
 
     /* Charms / Disasters above workbench */
     #charms {
-      top:auto; bottom:130px; left:8px; right:8px; transform:none;
+      top:auto; bottom:125px; left:8px; right:8px; transform:none;
       flex-direction:row; justify-content:center; flex-wrap:wrap; gap:6px;
     }
     #charms .rack { display:none; }
@@ -848,6 +848,8 @@ let currentMat = "wood", erasing = false;
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 let down = null, dragged = false;
+const pointers = new Map();
+let pinchDist = 0, pinchStartRadius = 0;
 
 function pickCell(e){
   const r = canvas.getBoundingClientRect();
@@ -869,12 +871,34 @@ function pickCell(e){
   return {gx:b.gx+n.x, gy:b.gy+n.y, gz:b.gz+n.z, block:b};
 }
 canvas.addEventListener("pointerdown", e=>{
-  down = {x:e.clientX, y:e.clientY, theta:orbit.theta, phi:orbit.phi};
-  dragged = false;
+  pointers.set(e.pointerId, {x: e.clientX, y: e.clientY});
+  if(pointers.size === 1){
+    down = {x:e.clientX, y:e.clientY, theta:orbit.theta, phi:orbit.phi};
+    dragged = false;
+  } else if(pointers.size === 2){
+    const pts = Array.from(pointers.values());
+    pinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    pinchStartRadius = orbit.radius;
+    dragged = true;
+    down = null;
+  }
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener("pointermove", e=>{
-  if(down){
+  if(pointers.has(e.pointerId)) pointers.set(e.pointerId, {x: e.clientX, y: e.clientY});
+  
+  if(pointers.size === 2){
+    const pts = Array.from(pointers.values());
+    const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    if(pinchDist > 0) {
+      orbit.radius = Math.max(8, Math.min(34, pinchStartRadius * (pinchDist / dist)));
+    }
+    canvas.classList.add("dragging");
+    ghost.visible = false;
+    return;
+  }
+
+  if(down && pointers.size === 1){
     const dx = e.clientX-down.x, dy = e.clientY-down.y;
     if(Math.hypot(dx,dy) > 6) dragged = true;
     if(dragged){
@@ -893,15 +917,22 @@ canvas.addEventListener("pointermove", e=>{
   ghost.position.set(c.gx-HALF, c.gy+0.5, c.gz-HALF);
 });
 canvas.addEventListener("pointerup", e=>{
-  canvas.classList.remove("dragging");
-  const wasDrag = dragged; down = null; dragged = false;
-  if(wasDrag || disaster) return;
-  const c = pickCell(e);
-  if(!c) return;
-  ensureAudio(); AC.resume();
-  if(erasing){ if(c.block){ removeBlock(c.block); blip(300,0.08,0.1); } return; }
-  addBlock(c.gx, c.gy, c.gz, currentMat);
-  document.getElementById("hint").style.opacity = 0;
+  pointers.delete(e.pointerId);
+  if(pointers.size === 0){
+    canvas.classList.remove("dragging");
+    const wasDrag = dragged; down = null; dragged = false;
+    if(wasDrag || disaster) return;
+    const c = pickCell(e);
+    if(!c) return;
+    ensureAudio(); AC.resume();
+    if(erasing){ if(c.block){ removeBlock(c.block); blip(300,0.08,0.1); } return; }
+    addBlock(c.gx, c.gy, c.gz, currentMat);
+    document.getElementById("hint").style.opacity = 0;
+  }
+});
+canvas.addEventListener("pointercancel", e=>{
+  pointers.delete(e.pointerId);
+  if(pointers.size === 0){ down = null; dragged = false; canvas.classList.remove("dragging"); }
 });
 canvas.addEventListener("wheel", e=>{
   e.preventDefault();
