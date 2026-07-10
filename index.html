@@ -121,9 +121,44 @@
     padding:.4rem .9rem;border-radius:999px;pointer-events:none;transition:opacity .6s;
   }
   @media (max-width:640px){
-    #charms{top:auto;bottom:150px;transform:none;flex-direction:row;right:8px;left:8px;justify-content:center;flex-wrap:wrap}
-    #charms .rack{display:none}
-    #hint{display:none}
+    /* Header adjustments */
+    #title { top:8px; left:8px; gap:6px; padding:0.4rem 0.6rem; }
+    #title h1 { font-size:0.9rem; }
+    #title small { display:none; }
+    #title .logo { width:26px; height:26px; font-size:14px; }
+    
+    #stats { top:8px; right:8px; gap:4px; }
+    #stats .chip { padding:0.4rem 0.6rem; font-size:0.7rem; gap:0.4rem; }
+    #stats b { font-size:0.85rem; }
+    .iconbtn { width:32px; height:32px; font-size:15px; border-radius:10px; }
+
+    /* Bottom Workbench dock */
+    #bench {
+      bottom:0; left:0; right:0; transform:none; border-radius:18px 18px 0 0;
+      padding:8px 6px 16px; gap:6px; max-width:none;
+    }
+    #bench::before { display:none; }
+    .mat { width:42px; padding:6px 2px; border-radius:12px; }
+    .mat .cube { width:22px; height:22px; }
+    .mat span { font-size:0.55rem; }
+    .divider { height:36px; margin:0 2px; }
+    select { padding:0.4rem 0.6rem; font-size:0.75rem; flex:1 1 100%; text-align:center; }
+
+    /* Charms / Disasters above workbench */
+    #charms {
+      top:auto; bottom:130px; left:8px; right:8px; transform:none;
+      flex-direction:row; justify-content:center; flex-wrap:wrap; gap:6px;
+    }
+    #charms .rack { display:none; }
+    .charm { padding:4px; gap:0; font-size:0; border-radius:12px; }
+    .charm .em { font-size:18px; width:32px; height:32px; border-radius:8px; margin:0; }
+    #intensityBox { padding:4px 10px; border-radius:12px; flex-direction:row; align-items:center; gap:8px; }
+    #intensityBox label { font-size:0; }
+    #intensityBox label::after { content:"⚡"; font-size:14px; }
+    #intensityBox input { width:80px; margin:0; }
+    
+    #hint { display:none; }
+    #toast { top: 60px; font-size: 0.8rem; padding: 0.6rem 1rem; }
   }
 </style>
 </head>
