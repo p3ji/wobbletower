@@ -716,7 +716,7 @@ function stepDisaster(dt){
   const I = d.intensity;
   const ramp = Math.min(1, d.t/1.2) * Math.min(1, (d.dur-d.t)/1.2); // ease in/out
 
-  if (gameMode === "survival") targetSkyColor = skyColors[type] || skyColors.night;
+  if (gameMode === "survival") targetSkyColor = skyColors[d.type] || skyColors.night;
   
   if(d.type==="quake"){
     const s = 0.09*I*ramp;
@@ -788,31 +788,6 @@ function stepDisaster(dt){
         b.vel.y += 9*pull*dt*I;
       }
     }
-    if(gameMode === "survival") {
-      for(const v of villagers) {
-        if (v.hidden) continue;
-        if (v.targetPos && !v.hidden) {
-          const dx = v.targetPos.x - v.x, dz = v.targetPos.z - v.z;
-          const dist = Math.hypot(dx, dz);
-          if (dist < 0.2) {
-            v.hidden = true; v.mesh.visible = false;
-            if (!v.targetBlock.hasDoor) {
-              v.targetBlock.hasDoor = true;
-              const door = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.4), new THREE.MeshLambertMaterial({color: 0x3d2314}));
-              door.position.set(0, -0.25, 0.51); 
-              v.targetBlock.mesh.add(door); v.targetBlock.doorMesh = door;
-            }
-          } else {
-            v.x += (dx / dist) * 0.05; v.z += (dz / dist) * 0.05;
-            v.mesh.position.set(v.x, 0.25, v.z);
-            v.mesh.rotation.y = Math.atan2(dx, dz);
-          }
-        } else if (!v.hidden) {
-          v.x += (Math.random()-0.5)*0.2; v.z += (Math.random()-0.5)*0.2;
-          v.mesh.position.set(v.x, 0.25, v.z); v.mesh.rotation.y += 0.5;
-        }
-      }
-    }
   }
   if(d.type==="meteor" && d.meteor){
     const m = d.meteor;
@@ -858,6 +833,33 @@ function stepDisaster(dt){
       if(d.hits < Math.round(2*I) && d.t < d.dur-3) setTimeout(()=>{ if(disaster===d) scheduleMeteor(d); }, 1400);
     }
   }
+
+  if(gameMode === "survival") {
+    for(const v of villagers) {
+      if (v.hidden) continue;
+      if (v.targetPos && !v.hidden) {
+        const dx = v.targetPos.x - v.x, dz = v.targetPos.z - v.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 0.2) {
+          v.hidden = true; v.mesh.visible = false;
+          if (!v.targetBlock.hasDoor) {
+            v.targetBlock.hasDoor = true;
+            const door = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.4), new THREE.MeshLambertMaterial({color: 0x3d2314}));
+            door.position.set(0, -0.25, 0.51); 
+            v.targetBlock.mesh.add(door); v.targetBlock.doorMesh = door;
+          }
+        } else {
+          v.x += (dx / dist) * 0.05; v.z += (dz / dist) * 0.05;
+          v.mesh.position.set(v.x, 0.25, v.z);
+          v.mesh.rotation.y = Math.atan2(dx, dz);
+        }
+      } else if (!v.hidden) {
+        v.x += (Math.random()-0.5)*0.2; v.z += (Math.random()-0.5)*0.2;
+        v.mesh.position.set(v.x, 0.25, v.z); v.mesh.rotation.y += 0.5;
+      }
+    }
+  }
+
   shakeAmp *= 0.94;
   if(d.t >= d.dur) endDisaster();
 }
