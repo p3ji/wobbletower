@@ -1193,14 +1193,15 @@ function tick(){
       if(b.mesh.userData.pop<=0){ b.mesh.scale.setScalar(1); b.mesh.userData.pop = 0; }
     }
   }
-  island.rotation.y = Math.sin(time*0.15)*0.004;  // the world breathes, very gently
+  island.rotation.y = Math.sin(t*0.15)*0.004;  // the world breathes, very gently
   applyCamera(shakeAmp);
   renderer.render(scene, camera);
   frames++;
   if(t>lastFps+1){ document.title=`${frames} fps`; frames=0; lastFps=t; }
 }
 
-requestAnimationFrame(render);
+tick();
+})();
 </script>
 
 </body>
