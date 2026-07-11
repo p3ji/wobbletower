@@ -126,6 +126,15 @@
   #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
   #toast b{color:var(--honey);}
 
+  .overlay{position:fixed;inset:0;background:rgba(255,247,236,0.85);z-index:9999;display:grid;place-items:center;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);}
+  .modal{background:var(--ink);color:var(--paper);padding:2rem;border-radius:18px;box-shadow:var(--shadow);text-align:center;max-width:320px;width:90%;}
+  .modal h1, .modal h2{margin-bottom:1rem;}
+  .modal p{font-size:0.95rem;color:rgba(255,255,255,0.8);margin-bottom:1.4rem;}
+  .modal-btn{display:flex;align-items:center;justify-content:center;width:100%;padding:1rem;margin-bottom:0.8rem;border:none;border-radius:12px;font-size:1.1rem;font-weight:bold;cursor:pointer;background:rgba(255,255,255,0.1);color:white;transition:transform 0.1s, background 0.1s;}
+  .modal-btn:hover{background:rgba(255,255,255,0.15);transform:translateY(-1px);}
+  .modal-btn.primary{background:var(--honey);color:var(--ink);}
+  .modal-btn.primary:hover{background:#ffc759;}
+
   #hint{
     position:fixed;left:50%;bottom:96px;transform:translateX(-50%);
     font-size:.74rem;color:var(--ink);background:rgba(255,247,236,.86);
@@ -185,10 +194,7 @@
 </div>
 
 <div id="stats">
-  <select id="modeSel" aria-label="Game Mode">
-    <option value="creative">Creative Mode</option>
-    <option value="survival">Survival Mode</option>
-  </select>
+  <button id="settingsBtn" class="iconbtn" aria-label="Settings">⚙️</button>
   <div class="chip">
     <span id="moneySpan" style="display:none; color:var(--honey); font-weight:bold;">$<span id="statMoney">100</span></span>
     <span>Blocks <b id="statBlocks">0</b></span><span>Height <b id="statHeight">0</b></span>
@@ -217,13 +223,17 @@
 
 <div id="charms" aria-label="Disasters">
   <div class="rack"></div>
-  <button class="charm" data-dis="quake"><span class="em">🫨</span> Earthquake</button>
-  <button class="charm" data-dis="wind"><span class="em">🌬️</span> Windstorm</button>
-  <button class="charm" data-dis="tornado"><span class="em">🌪️</span> Tornado</button>
-  <button class="charm" data-dis="meteor"><span class="em">☄️</span> Meteor</button>
-  <div id="intensityBox">
+  <button class="charm creative-only" data-dis="quake"><span class="em">🫨</span> Earthquake</button>
+  <button class="charm creative-only" data-dis="wind"><span class="em">🌬️</span> Windstorm</button>
+  <button class="charm creative-only" data-dis="tornado"><span class="em">🌪️</span> Tornado</button>
+  <button class="charm creative-only" data-dis="meteor"><span class="em">☄️</span> Meteor</button>
+  <div id="intensityBox" class="creative-only">
     <label for="intensity">Ferocity</label>
     <input id="intensity" type="range" min="0.4" max="1.6" step="0.05" value="1">
+  </div>
+  <div id="survivalDisaster" style="display:none; background:var(--ink); padding:0.6rem 1rem; border-radius:12px; color:var(--paper); align-items:center; gap:12px; font-size:0.85rem;">
+    <span>Next: <strong id="nextDisasterName" style="color:var(--honey)">🌪️ Tornado</strong> (Ferocity <span id="nextDisasterInt">1.0</span>)</span>
+    <button id="triggerNextBtn" class="modal-btn primary" style="padding:0.4rem 1rem; margin:0; width:auto; font-size:0.8rem;">Trigger Wave</button>
   </div>
   <button class="charm" id="calmBtn" hidden><span class="em">☀️</span> Calm skies</button>
 </div>
@@ -623,6 +633,7 @@ function endDisaster(){
         toast(`☀️ Calm again. Tragically, no villagers survived... Better build stronger shelters next time.`);
         playChime(false);
       }
+      rollNextDisaster();
     } else {
       if(pct>=70){
         toast(`☀️ Calm again. <b>${pct}%</b> of your tower stood proud — sturdy work!`);
@@ -1057,20 +1068,58 @@ document.getElementById("eraser").addEventListener("click", function(){
   erasing = !erasing;
   this.setAttribute("aria-pressed", erasing);
 });
-document.getElementById("modeSel").addEventListener("change", e => {
-  gameMode = e.target.value;
+
+const DISASTERS = ["quake", "wind", "tornado", "meteor"];
+const DISASTER_ICONS = {"quake":"🫨 Earthquake", "wind":"🌬️ Windstorm", "tornado":"🌪️ Tornado", "meteor":"☄️ Meteor"};
+let nextDisType = "wind";
+let nextDisInt = 1.0;
+
+function rollNextDisaster() {
+  nextDisType = DISASTERS[Math.floor(Math.random() * DISASTERS.length)];
+  nextDisInt = (0.6 + Math.random() * 0.8).toFixed(1);
+  document.getElementById("nextDisasterName").innerHTML = DISASTER_ICONS[nextDisType];
+  document.getElementById("nextDisasterInt").textContent = nextDisInt;
+}
+
+document.getElementById("triggerNextBtn").addEventListener("click", () => {
+  if(disaster) return;
+  startDisaster(nextDisType, parseFloat(nextDisInt));
+});
+
+function setMode(mode) {
+  gameMode = mode;
   if(gameMode === "survival") {
     document.body.classList.add("survival-mode");
     document.getElementById("moneySpan").style.display = "inline";
     money = 100;
     document.getElementById("statMoney").textContent = money;
     while(blocks.length) removeBlock(blocks[0]);
+    rollNextDisaster();
     toast("Welcome to Survival Mode! Build shelters to protect villagers.");
   } else {
     document.body.classList.remove("survival-mode");
     document.getElementById("moneySpan").style.display = "none";
+    toast("Creative Mode: unlimited blocks!");
   }
+}
+document.querySelectorAll("#homeScreen .modal-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.getElementById("homeScreen").style.display = "none";
+    setMode(btn.dataset.mode);
+  });
 });
+
+document.getElementById("settingsBtn").addEventListener("click", () => {
+  document.getElementById("setCreativeBtn").style.boxShadow = gameMode === "creative" ? "inset 0 0 0 2px var(--honey)" : "none";
+  document.getElementById("setSurvivalBtn").style.boxShadow = gameMode === "survival" ? "inset 0 0 0 2px var(--honey)" : "none";
+  document.getElementById("setMusicBtn").textContent = "Toggle Music (" + (musicOn ? "On" : "Off") + ")";
+  document.getElementById("settingsScreen").style.display = "grid";
+});
+document.getElementById("closeSettingsBtn").addEventListener("click", () => { document.getElementById("settingsScreen").style.display = "none"; });
+document.getElementById("setCreativeBtn").addEventListener("click", () => { setMode("creative"); document.getElementById("closeSettingsBtn").click(); });
+document.getElementById("setSurvivalBtn").addEventListener("click", () => { setMode("survival"); document.getElementById("closeSettingsBtn").click(); });
+document.getElementById("setMusicBtn").addEventListener("click", () => { document.getElementById("musicBtn").click(); document.getElementById("setMusicBtn").textContent = "Toggle Music (" + (musicOn ? "On" : "Off") + ")"; });
+
 document.getElementById("undoBtn").addEventListener("click", ()=>{
   const b = undoStack.pop();
   if(b && blocks.includes(b) && b.state==="sleep") removeBlock(b);
@@ -1125,14 +1174,34 @@ function tick(){
       if(b.mesh.userData.pop<=0){ b.mesh.scale.setScalar(1); b.mesh.userData.pop = 0; }
     }
   }
-  island.rotation.y = Math.sin(t*0.15)*0.004;  // the world breathes, very gently
+  island.rotation.y = Math.sin(time*0.15)*0.004;  // the world breathes, very gently
   applyCamera(shakeAmp);
   renderer.render(scene, camera);
+  frames++;
+  if(t>lastFps+1){ document.title=`${frames} fps`; frames=0; lastFps=t; }
 }
-loadPreset("wizard");
-toast("Welcome to <b>Wobbleton</b>! Stack blocks, then pull a weather charm. 🎵 turns on the music.");
-tick();
-})();
+
+requestAnimationFrame(render);
 </script>
+
+<div id="homeScreen" class="overlay">
+  <div class="modal">
+    <h1>Wobbleton</h1>
+    <p>Select your game mode:</p>
+    <button class="modal-btn primary" data-mode="creative">Creative Mode</button>
+    <button class="modal-btn" data-mode="survival">Survival Mode</button>
+  </div>
+</div>
+
+<div id="settingsScreen" class="overlay" style="display:none;">
+  <div class="modal">
+    <h2>Settings</h2>
+    <button id="setCreativeBtn" class="modal-btn">Creative Mode</button>
+    <button id="setSurvivalBtn" class="modal-btn">Survival Mode</button>
+    <button id="setMusicBtn" class="modal-btn">Toggle Music (Off)</button>
+    <button id="closeSettingsBtn" class="modal-btn primary" style="margin-top:1.4rem">Close</button>
+  </div>
+</div>
+
 </body>
 </html>
