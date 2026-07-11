@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Wobbleton — Tower Workshop</title>
+<link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
 <style>
   :root{
     --ink:#2e2440;          /* plum-navy panels */
@@ -46,6 +48,12 @@
   }
   #stats .chip{display:flex;gap:.9rem;font-size:.82rem;}
   #stats b{color:var(--honey);font-size:1rem;}
+  .cost{display:none;font-size:0.6rem;color:var(--honey);margin-top:2px;font-weight:bold;}
+  .survival-mode .cost{display:block;}
+  .survival-mode .creative-only{display:none !important;}
+  .survival-mode #presetSel {display:none;}
+  #modeSel {padding:4px; font-size:0.8rem; border-radius:8px; background:rgba(0,0,0,0.2); color:white; border:1px solid rgba(255,255,255,0.2); outline:none; font-family:inherit;}
+  #modeSel option {color:black;}
   .iconbtn{
     width:42px;height:42px;border:none;border-radius:14px;background:var(--ink);color:var(--paper);
     box-shadow:var(--shadow);font-size:19px;cursor:pointer;transition:transform .12s ease;
@@ -177,16 +185,23 @@
 </div>
 
 <div id="stats">
-  <div class="chip"><span>Blocks <b id="statBlocks">0</b></span><span>Height <b id="statHeight">0</b></span></div>
+  <select id="modeSel" aria-label="Game Mode">
+    <option value="creative">Creative Mode</option>
+    <option value="survival">Survival Mode</option>
+  </select>
+  <div class="chip">
+    <span id="moneySpan" style="display:none; color:var(--honey); font-weight:bold;">$<span id="statMoney">100</span></span>
+    <span>Blocks <b id="statBlocks">0</b></span><span>Height <b id="statHeight">0</b></span>
+  </div>
   <button id="musicBtn" class="iconbtn" aria-pressed="false" title="Play music" aria-label="Toggle music">🎵</button>
 </div>
 
 <div id="bench" role="toolbar" aria-label="Building materials">
-  <button class="mat" data-mat="straw"  aria-pressed="false"><div class="cube" style="background:#e8cf7a"></div><span>Straw</span></button>
-  <button class="mat" data-mat="wood"   aria-pressed="true"><div class="cube" style="background:#c98a54"></div><span>Wood</span></button>
-  <button class="mat" data-mat="brick"  aria-pressed="false"><div class="cube" style="background:#d96f5e"></div><span>Brick</span></button>
-  <button class="mat" data-mat="stone"  aria-pressed="false"><div class="cube" style="background:#9aa3b2"></div><span>Stone</span></button>
-  <button class="mat" data-mat="glass"  aria-pressed="false"><div class="cube" style="background:#b5e3ee"></div><span>Glass</span></button>
+  <button class="mat" data-mat="straw"  aria-pressed="false"><div class="cube" style="background:#e8cf7a"></div><span>Straw</span><div class="cost">$5</div></button>
+  <button class="mat" data-mat="wood"   aria-pressed="true"><div class="cube" style="background:#c98a54"></div><span>Wood</span><div class="cost">$15</div></button>
+  <button class="mat" data-mat="brick"  aria-pressed="false"><div class="cube" style="background:#d96f5e"></div><span>Brick</span><div class="cost">$40</div></button>
+  <button class="mat" data-mat="stone"  aria-pressed="false"><div class="cube" style="background:#9aa3b2"></div><span>Stone</span><div class="cost">$80</div></button>
+  <button class="mat" data-mat="glass"  aria-pressed="false"><div class="cube" style="background:#b5e3ee"></div><span>Glass</span><div class="cost">$20</div></button>
   <div class="divider"></div>
   <button class="mat" id="eraser" aria-pressed="false"><div class="cube" style="background:var(--blush);display:grid;place-items:center;font-size:14px">✕</div><span>Erase</span></button>
   <button class="mat" id="undoBtn"><div class="cube" style="background:#8f86b8;display:grid;place-items:center;font-size:14px">↩</div><span>Undo</span></button>
@@ -308,12 +323,16 @@ for(let i=0;i<6;i++){
 }
 
 /* ---------------- 2. BLOCKS ---------------- */
+let gameMode = "creative";
+let money = 100;
+const SURVIVAL_REWARD = 30;
+
 const MATS = {
-  straw:{color:0xe8cf7a, mass:0.4, grip:0.55, name:"Straw"},
-  wood: {color:0xc98a54, mass:1.0, grip:1.0,  name:"Wood"},
-  brick:{color:0xd96f5e, mass:1.6, grip:1.5,  name:"Brick"},
-  stone:{color:0x9aa3b2, mass:2.4, grip:2.2,  name:"Stone"},
-  glass:{color:0xb5e3ee, mass:0.9, grip:0.7,  name:"Glass", fragile:true},
+  straw:{color:0xe8cf7a, mass:0.4, grip:0.55, name:"Straw", cost:5},
+  wood: {color:0xc98a54, mass:1.0, grip:1.0,  name:"Wood", cost:15},
+  brick:{color:0xd96f5e, mass:1.6, grip:1.5,  name:"Brick", cost:40},
+  stone:{color:0x9aa3b2, mass:2.4, grip:2.2,  name:"Stone", cost:80},
+  glass:{color:0xb5e3ee, mass:0.9, grip:0.7,  name:"Glass", fragile:true, cost:20},
 };
 for(const k in MATS){
   MATS[k].material = new THREE.MeshLambertMaterial({
@@ -331,6 +350,14 @@ function addBlock(gx, gy, gz, matName, silent){
   if(gx<0||gx>=GRID||gz<0||gz>=GRID||gy<0||gy>=MAXY) return null;
   if(cellMap.has(key(gx,gy,gz))) return null;
   const m = MATS[matName];
+  if(!silent && gameMode === "survival") {
+    if(money < m.cost) {
+      toast("Not enough funds!");
+      return null;
+    }
+    money -= m.cost;
+    document.getElementById("statMoney").textContent = money;
+  }
   const mesh = new THREE.Mesh(blockGeo, m.material.clone());
   mesh.castShadow = mesh.receiveShadow = true;
   mesh.position.set(gx-HALF, gy+0.5, gz-HALF);
@@ -346,6 +373,10 @@ function removeBlock(b){
   cellMap.delete(key(b.gx,b.gy,b.gz));
   scene.remove(b.mesh);
   const i = blocks.indexOf(b); if(i>=0) blocks.splice(i,1);
+  if(gameMode === "survival" && b.state === "sleep") {
+    money += Math.floor(MATS[b.mat].cost / 2);
+    document.getElementById("statMoney").textContent = money;
+  }
   refreshStats();
 }
 function popIn(mesh){ mesh.scale.setScalar(0.2); mesh.userData.pop = 1; }
@@ -579,16 +610,31 @@ function endDisaster(){
     const standing = blocks.filter(b=>b.state==="sleep").length;
     const pct = preCount? Math.round(standing/preCount*100) : 0;
     refreshStats();
-    if(pct>=70){
-      toast(`☀️ Calm again. <b>${pct}%</b> of your tower stood proud — sturdy work!`);
-      confetti();
-      playChime(true);
-    } else if(pct>=30){
-      toast(`☀️ Calm again. <b>${pct}%</b> survived. A wobble, not a tragedy.`);
-      playChime(false);
+    if(gameMode === "survival") {
+      const survivors = villagers.length;
+      const earned = survivors * SURVIVAL_REWARD;
+      if(survivors > 0) {
+        toast(`☀️ Calm again. <b>${survivors}</b> villagers survived! You earned $${earned}.`);
+        money += earned;
+        document.getElementById("statMoney").textContent = money;
+        confetti();
+        playChime(true);
+      } else {
+        toast(`☀️ Calm again. Tragically, no villagers survived... Better build stronger shelters next time.`);
+        playChime(false);
+      }
     } else {
-      toast(`☀️ Calm again. <b>${pct}%</b> survived… the villagers suggest more stone.`);
-      playChime(false);
+      if(pct>=70){
+        toast(`☀️ Calm again. <b>${pct}%</b> of your tower stood proud — sturdy work!`);
+        confetti();
+        playChime(true);
+      } else if(pct>=30){
+        toast(`☀️ Calm again. <b>${pct}%</b> survived. A wobble, not a tragedy.`);
+        playChime(false);
+      } else {
+        toast(`☀️ Calm again. <b>${pct}%</b> survived… the villagers suggest more stone.`);
+        playChime(false);
+      }
     }
   }, 1800);
 }
@@ -620,6 +666,13 @@ function stepDisaster(dt){
         wake(b, Math.sin(d.t*34)*2.4*I, 0.4, Math.cos(d.t*27)*2.4*I);
       }
     }
+    if(gameMode === "survival") {
+      for(const v of villagers) {
+        if(v.vel.lengthSq() > 0.1 || v.g.position.y > 0.5) continue;
+        const jolt = I*ramp*(0.9+Math.random()*0.6);
+        if(jolt > 1.2) v.vel.set(Math.sin(d.t*34)*2*I, 1.0, Math.cos(d.t*27)*2*I);
+      }
+    }
   }
   if(d.type==="wind"){
     const gust = 0.55 + 0.45*Math.sin(d.t*1.7) * Math.sin(d.t*0.6+1);
@@ -631,6 +684,15 @@ function stepDisaster(dt){
         if(push > gripOf(b)*0.95) wake(b, -3.2*I*gust, 0.5, (Math.random()-.5));
       } else if(b.state==="awake"){
         b.vel.x -= 5.5*I*gust*dt;   // debris sails downwind
+      }
+    }
+    if(gameMode === "survival") {
+      for(const v of villagers) {
+        if(v.vel.lengthSq() > 0.1 || v.g.position.y > 0.5) continue;
+        const gx = Math.round(v.g.position.x + HALF), gz = Math.round(v.g.position.z + HALF);
+        const sheltered = cellMap.has(key(gx+1, 0, gz)) || cellMap.has(key(gx+1, 1, gz)) || cellMap.has(key(gx+2, 0, gz));
+        const push = I * gust * ramp * (sheltered ? 0.25 : 1);
+        if(push > 0.6) v.vel.set(-3.2 * I * gust, 1.5, (Math.random() - 0.5));
       }
     }
     for(const p of particles) p.userData.vel.x -= 3*I*gust*dt;
@@ -660,6 +722,19 @@ function stepDisaster(dt){
         b.vel.y += 9*pull*dt*I;
       }
     }
+    if(gameMode === "survival") {
+      for(const v of villagers) {
+        if(v.vel.lengthSq() > 0.1 || v.g.position.y > 0.5) continue;
+        const dx = v.g.position.x - c.x, dz = v.g.position.z - c.y;
+        const r = Math.hypot(dx,dz);
+        if(r > 3.1) continue;
+        const pull = (1 - r/3.1);
+        const gx = Math.round(v.g.position.x + HALF), gz = Math.round(v.g.position.z + HALF);
+        const bx = Math.sign(-dx), bz = Math.sign(-dz);
+        const sheltered = cellMap.has(key(gx+bx, 0, gz)) || cellMap.has(key(gx, 0, gz+bz));
+        if(I * pull * 1.6 > 0.8 && !sheltered) v.vel.set(-dz/r*4*I, 4.5*I*pull, dx/r*4*I);
+      }
+    }
   }
   if(d.type==="meteor" && d.meteor){
     const m = d.meteor;
@@ -684,6 +759,20 @@ function stepDisaster(dt){
           if(b.state==="sleep") wake(b, dir.x*8*I/(0.5+dist), 4*I/(0.5+dist), dir.z*8*I/(0.5+dist));
           else b.vel.addScaledVector(dir, 8*I/(0.5+dist));
           if(MATS[b.mat].fragile) shatter(b);
+        }
+      }
+      if(gameMode === "survival") {
+        for(const v of villagers) {
+          if(v.vel.lengthSq() > 0.1 || v.g.position.y > 0.5) continue;
+          const dist = m.pos.distanceTo(v.g.position);
+          if(dist < 3.0*I) {
+             const gx = Math.round(v.g.position.x + HALF), gz = Math.round(v.g.position.z + HALF);
+             const sheltered = cellMap.has(key(gx, 1, gz)) || cellMap.has(key(gx, 2, gz));
+             if(!sheltered) {
+                const dir = new THREE.Vector3().subVectors(v.g.position, m.pos).normalize();
+                v.vel.set(dir.x*8*I/(0.5+dist), 5*I/(0.5+dist), dir.z*8*I/(0.5+dist));
+             }
+          }
         }
       }
       meteorMesh.visible = false; d.meteor = null;
@@ -732,7 +821,7 @@ function makeVillager(color, x, z){
   const ex = exclaimSprite(); ex.position.y = 1.3; ex.visible = false; g.add(ex);
   g.position.set(x,0,z);
   scene.add(g);
-  const v = {g, ex, armL, armR, target:new THREE.Vector2(x,z), speed:0.7, panic:false, phase:Math.random()*9};
+  const v = {g, ex, armL, armR, target:new THREE.Vector2(x,z), speed:0.7, panic:false, phase:Math.random()*9, vel:new THREE.Vector3()};
   villagers.push(v); return v;
 }
 makeVillager(0x9fe3c0, 4.6, -1.5);
@@ -740,21 +829,31 @@ makeVillager(0xf4a6b0, -4.2, 2.0);
 makeVillager(0xf5b85c, 1.0, 5.0);
 
 function stepVillagers(dt, t){
-  for(const v of villagers){
-    v.ex.visible = v.panic;
+  for(let i=villagers.length-1; i>=0; i--){
+    const v = villagers[i];
     const p = v.g.position;
-    const d = new THREE.Vector2(v.target.x - p.x, v.target.y - p.z);
-    if(d.length() < 0.25 || Math.random() < (v.panic?0.02:0.004)){
-      // pick a new stroll target on the meadow rim, away from the build zone
-      const a = Math.random()*Math.PI*2, r = 4.2 + Math.random()*1.6;
-      v.target.set(Math.cos(a)*r, Math.sin(a)*r);
+    if(v.vel.lengthSq() > 0.1 || p.y > 0.3) {
+      v.vel.y -= 9.8*dt;
+      p.addScaledVector(v.vel, dt);
+      v.g.rotation.x += dt*4; v.g.rotation.z += dt*3;
+      if(p.y < -12) { scene.remove(v.g); villagers.splice(i,1); }
+      continue;
     }
-    d.normalize();
+    v.ex.visible = v.panic;
+    if(gameMode==="survival" && v.panic){
+      v.target.set(0,0);
+    } else {
+      const dTarget = new THREE.Vector2(v.target.x - p.x, v.target.y - p.z);
+      if(dTarget.length() < 0.25 || Math.random() < (v.panic?0.02:0.004)){
+        const a = Math.random()*Math.PI*2, r = 4.2 + Math.random()*1.6;
+        v.target.set(Math.cos(a)*r, Math.sin(a)*r);
+      }
+    }
+    const d = new THREE.Vector2(v.target.x - p.x, v.target.y - p.z).normalize();
     const sp = v.panic ? 2.6 : v.speed;
     p.x += d.x*sp*dt; p.z += d.y*sp*dt;
     v.g.rotation.y = Math.atan2(d.x, d.y);
-    const bounce = v.panic ? Math.abs(Math.sin(t*16+v.phase))*0.16 : Math.abs(Math.sin(t*7+v.phase))*0.05;
-    p.y = bounce;
+    p.y = v.panic ? Math.abs(Math.sin(t*16+v.phase))*0.16 : Math.abs(Math.sin(t*7+v.phase))*0.05;
     const wave = v.panic ? Math.sin(t*20+v.phase)*1.2 : Math.sin(t*7+v.phase)*0.35;
     v.armL.rotation.x = wave; v.armR.rotation.x = -wave;
     if(v.panic){ v.armL.rotation.z = 2.6; v.armR.rotation.z = -2.6; }
@@ -957,6 +1056,20 @@ document.querySelectorAll(".mat[data-mat]").forEach(btn=>{
 document.getElementById("eraser").addEventListener("click", function(){
   erasing = !erasing;
   this.setAttribute("aria-pressed", erasing);
+});
+document.getElementById("modeSel").addEventListener("change", e => {
+  gameMode = e.target.value;
+  if(gameMode === "survival") {
+    document.body.classList.add("survival-mode");
+    document.getElementById("moneySpan").style.display = "inline";
+    money = 100;
+    document.getElementById("statMoney").textContent = money;
+    while(blocks.length) removeBlock(blocks[0]);
+    toast("Welcome to Survival Mode! Build shelters to protect villagers.");
+  } else {
+    document.body.classList.remove("survival-mode");
+    document.getElementById("moneySpan").style.display = "none";
+  }
 });
 document.getElementById("undoBtn").addEventListener("click", ()=>{
   const b = undoStack.pop();
