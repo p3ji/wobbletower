@@ -1168,6 +1168,7 @@ function rollNextDisaster() {
 
 document.getElementById("triggerNextBtn").addEventListener("click", () => {
   if(disaster) return;
+  waveTimer = 0;
   startDisaster(nextDisType, parseFloat(nextDisInt));
 });
 

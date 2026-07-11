@@ -1,0 +1,25 @@
+{
+  "name": "wobbletower",
+  "version": "1.0.0",
+  "description": "A cozy 3D tower simulator built with three.js. Stack blocks from different materials, then subject your creation to earthquakes, windstorms, tornadoes, and meteors. Watch your tower wobble, crumble, or stand proud against the elements.",
+  "main": "simulate_economy.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/p3ji/wobbletower.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/p3ji/wobbletower/issues"
+  },
+  "homepage": "https://github.com/p3ji/wobbletower#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "serve": "^14.2.6"
+  }
+}
