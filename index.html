@@ -241,6 +241,25 @@
 <div id="toast" role="status"></div>
 <div id="hint">Click the meadow to stack blocks · drag to spin the world · scroll to zoom</div>
 
+<div id="homeScreen" class="overlay">
+  <div class="modal">
+    <h1>Wobbleton</h1>
+    <p>Select your game mode:</p>
+    <button class="modal-btn primary" data-mode="creative">Creative Mode</button>
+    <button class="modal-btn" data-mode="survival">Survival Mode</button>
+  </div>
+</div>
+
+<div id="settingsScreen" class="overlay" style="display:none;">
+  <div class="modal">
+    <h2>Settings</h2>
+    <button id="setCreativeBtn" class="modal-btn">Creative Mode</button>
+    <button id="setSurvivalBtn" class="modal-btn">Survival Mode</button>
+    <button id="setMusicBtn" class="modal-btn">Toggle Music (Off)</button>
+    <button id="closeSettingsBtn" class="modal-btn primary" style="margin-top:1.4rem">Close</button>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 /* =========================================================================
@@ -1183,25 +1202,6 @@ function tick(){
 
 requestAnimationFrame(render);
 </script>
-
-<div id="homeScreen" class="overlay">
-  <div class="modal">
-    <h1>Wobbleton</h1>
-    <p>Select your game mode:</p>
-    <button class="modal-btn primary" data-mode="creative">Creative Mode</button>
-    <button class="modal-btn" data-mode="survival">Survival Mode</button>
-  </div>
-</div>
-
-<div id="settingsScreen" class="overlay" style="display:none;">
-  <div class="modal">
-    <h2>Settings</h2>
-    <button id="setCreativeBtn" class="modal-btn">Creative Mode</button>
-    <button id="setSurvivalBtn" class="modal-btn">Survival Mode</button>
-    <button id="setMusicBtn" class="modal-btn">Toggle Music (Off)</button>
-    <button id="closeSettingsBtn" class="modal-btn primary" style="margin-top:1.4rem">Close</button>
-  </div>
-</div>
 
 </body>
 </html>
