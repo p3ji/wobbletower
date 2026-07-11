@@ -20,8 +20,7 @@
     font-size: 16px;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
-  html,body{margin:0;height:100%;overflow:hidden;background:#b7c4ef;}
-  body{font-family: ui-rounded, "Hiragino Maru Gothic ProN", "Arial Rounded MT Bold", "Trebuchet MS", Verdana, sans-serif; color:var(--paper);}
+  html,  body { margin: 0; overflow: hidden; background: #87CEEB; font-family: system-ui, sans-serif; user-select: none; -webkit-user-select: none; touch-action: none; }
   #scene{position:fixed;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:none;}
   #scene.building{cursor:crosshair;}
   #scene.dragging{cursor:grabbing;}
@@ -233,7 +232,7 @@
   </div>
   <div id="survivalDisaster" style="display:none; background:var(--ink); padding:0.6rem 1rem; border-radius:12px; color:var(--paper); align-items:center; gap:12px; font-size:0.85rem;">
     <span>Next: <strong id="nextDisasterName" style="color:var(--honey)">🌪️ Tornado</strong> (Ferocity <span id="nextDisasterInt">1.0</span>)</span>
-    <button id="triggerNextBtn" class="modal-btn primary" style="padding:0.4rem 1rem; margin:0; width:auto; font-size:0.8rem;">Trigger Wave</button>
+    <button id="triggerNextBtn" class="modal-btn primary" style="padding:0.4rem 1rem; margin:0; width:auto; font-size:0.8rem;">Trigger Now (<span id="waveTimerSpan">30</span>s)</button>
   </div>
   <button class="charm" id="calmBtn" hidden><span class="em">☀️</span> Calm skies</button>
 </div>
@@ -281,9 +280,10 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
+const currentSkyColor = new THREE.Color(0x87CEEB);
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xb7c4ef);          // lavender dusk
-scene.fog = new THREE.Fog(0xb7c4ef, 26, 60);
+scene.background = currentSkyColor;
+scene.fog = new THREE.FogExp2(0x87CEEB, 0.02);
 
 const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 300);
 const orbit = {theta: Math.PI*0.22, phi: Math.PI*0.34, radius: 19, target:new THREE.Vector3(0,2.4,0)};
@@ -671,16 +671,23 @@ function endDisaster(){
       const survivors = villagers.filter(v => !v.hidden).length;
       const earned = survivors * SURVIVAL_REWARD;
       if(survivors > 0) {
-        toast(`☀️ Calm again. <b>${survivors}</b> villagers survived! You earned $${earned}.`);
         money += earned;
+        let msg = `☀️ Calm again. <b>${survivors}</b> villagers survived! You earned $${earned}.`;
+        
+        // Immigration: add 1 villager if we have shelter capacity and aren't overpopulated (max 15)
+        if(villagers.length < blocks.length / 2 && villagers.length < 15) {
+          makeVillager(Math.random()*0xffffff, (Math.random()-0.5)*8, (Math.random()-0.5)*8);
+          msg += ` A new villager joined!`;
+        }
+        
+        toast(msg);
         document.getElementById("statMoney").textContent = money;
-        confetti();
-        playChime(true);
       } else {
-        toast(`☀️ Calm again. Tragically, no villagers survived... Better build stronger shelters next time.`);
-        playChime(false);
+        toast(`💀 Disaster passed... but no one survived.`);
       }
       rollNextDisaster();
+      waveTimer = 30; // reset timer
+      targetSkyColor = skyColors.day;
     } else {
       if(pct>=70){
         toast(`☀️ Calm again. <b>${pct}%</b> of your tower stood proud — sturdy work!`);
@@ -710,6 +717,8 @@ function stepDisaster(dt){
   const I = d.intensity;
   const ramp = Math.min(1, d.t/1.2) * Math.min(1, (d.dur-d.t)/1.2); // ease in/out
 
+  if (gameMode === "survival") targetSkyColor = skyColors[type] || skyColors.night;
+  
   if(d.type==="quake"){
     const s = 0.09*I*ramp;
     island.position.x = Math.sin(d.t*34)*s;
@@ -894,10 +903,17 @@ function makeVillager(color, x, z){
   const v = {g, ex, armL, armR, x, z, target:new THREE.Vector2(x,z), speed:0.7, panic:false, phase:Math.random()*9, vel:new THREE.Vector3(), mesh:g};
   villagers.push(v); return v;
 }
-makeVillager(0x9fe3c0, 4.6, -1.5);
-makeVillager(0xf4a6b0, -4.2, 2.0);
-makeVillager(0xf5b85c, 1.0, 5.0);
-
+function initVillagers() {
+  villagers.forEach(v => scene.remove(v.mesh));
+  villagers.length = 0;
+  const count = gameMode === "survival" ? 2 : 6;
+  const colors = [0x9fe3c0, 0xd1a98a, 0x8ab9d1, 0xebd988, 0x86c290, 0xba88eb];
+  for (let i = 0; i < count; i++) {
+    const angle = (i / count) * Math.PI * 2;
+    makeVillager(colors[i % colors.length] || Math.random()*0xffffff, Math.cos(angle)*4, Math.sin(angle)*4);
+  }
+}
+initVillagers();
 function stepVillagers(dt, t){
   for(let i=villagers.length-1; i>=0; i--){
     const v = villagers[i];
@@ -1132,6 +1148,17 @@ const DISASTER_ICONS = {"quake":"🫨 Earthquake", "wind":"🌬️ Windstorm", "
 let nextDisType = "quake", nextDisInt = 1.0;
 let frames = 0, lastFps = 0;
 
+const skyColors = {
+  day: new THREE.Color(0x87CEEB),
+  night: new THREE.Color(0x0a0a2a),
+  quake: new THREE.Color(0x4a2a4a),
+  wind: new THREE.Color(0x334455),
+  tornado: new THREE.Color(0x223344),
+  meteor: new THREE.Color(0x5a2a2a)
+};
+let targetSkyColor = skyColors.day;
+let waveTimer = 30;
+
 function rollNextDisaster() {
   nextDisType = DISASTERS[Math.floor(Math.random() * DISASTERS.length)];
   nextDisInt = (0.6 + Math.random() * 0.8).toFixed(1);
@@ -1151,14 +1178,19 @@ function setMode(mode) {
     document.getElementById("moneySpan").style.display = "inline";
     document.getElementById("survivalDisaster").style.display = "flex";
     money = 100;
+    waveTimer = 30;
     document.getElementById("statMoney").textContent = money;
     while(blocks.length) removeBlock(blocks[0]);
+    initVillagers();
     rollNextDisaster();
+    targetSkyColor = skyColors.day;
     toast("Welcome to Survival Mode! Build shelters to protect villagers.");
   } else {
     document.body.classList.remove("survival-mode");
     document.getElementById("moneySpan").style.display = "none";
     document.getElementById("survivalDisaster").style.display = "none";
+    initVillagers();
+    targetSkyColor = skyColors.day;
     toast("Creative Mode: unlimited blocks!");
   }
 }
@@ -1220,6 +1252,25 @@ function tick(){
   stepPhysics(dt);
   stepParticles(dt);
   stepVillagers(dt, t);
+
+  // Day/Night Cycle and Auto-Waves
+  if (gameMode === "survival" && !disaster) {
+    waveTimer -= dt;
+    if (waveTimer < 0) waveTimer = 0;
+    document.getElementById("waveTimerSpan").textContent = Math.ceil(waveTimer);
+    if (waveTimer <= 5) targetSkyColor = skyColors.night;
+    else targetSkyColor = skyColors.day;
+
+    if (waveTimer === 0) {
+      startDisaster(nextDisType, nextDisInt);
+    }
+  }
+
+  // Sky lerping
+  currentSkyColor.lerp(targetSkyColor, 0.02);
+  scene.background = currentSkyColor;
+  scene.fog.color = currentSkyColor;
+
   for(const c of clouds){
     c.position.x += c.userData.speed*dt;
     if(c.position.x > 22) c.position.x = -22;
@@ -1265,7 +1316,10 @@ window.WobbletonAPI = {
     return !!b;
   },
   triggerWave: () => {
-     if(!disaster) startDisaster(nextDisType, nextDisInt);
+     if(!disaster) {
+        waveTimer = 0;
+        startDisaster(nextDisType, nextDisInt);
+     }
   }
 };
 
