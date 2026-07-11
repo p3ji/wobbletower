@@ -609,7 +609,25 @@ function startDisaster(type){
     disaster.hits = 0;
     scheduleMeteor(disaster);
   }
-  villagers.forEach(v=>v.panic=true);
+  villagers.forEach(v => {
+    v.panic = true;
+    v.hidden = false;
+    v.mesh.visible = true;
+    let bestDist = Infinity;
+    let target = null;
+    let targetB = null;
+    for (const b of blocks) {
+      if (b.state !== "sleep" || b.gy > 1) continue; 
+      const dist = Math.hypot(b.gx - HALF - v.x, b.gz - HALF - v.z);
+      if (dist < bestDist) {
+         bestDist = dist;
+         target = {x: b.gx - HALF, z: b.gz - HALF};
+         targetB = b;
+      }
+    }
+    v.targetPos = target;
+    v.targetBlock = targetB;
+  });
   document.querySelectorAll(".charm[data-dis]").forEach(b=>b.disabled=true);
   document.getElementById("calmBtn").hidden = false;
   canvas.classList.remove("building");
@@ -628,8 +646,18 @@ function endDisaster(){
   disaster = null;
   funnel.visible = false; meteorMesh.visible = false;
   island.position.set(0,0,0);
-  for(const b of blocks) if(b.state==="sleep") b.mesh.position.set(b.gx-HALF, b.gy+0.5, b.gz-HALF);
-  villagers.forEach(v=>v.panic=false);
+  for(const b of blocks) {
+    if(b.state==="sleep") b.mesh.position.set(b.gx-HALF, b.gy+0.5, b.gz-HALF);
+    if(b.hasDoor && b.doorMesh) {
+      b.mesh.remove(b.doorMesh);
+      b.hasDoor = false;
+    }
+  }
+  villagers.forEach(v=>{
+    v.panic = false;
+    v.hidden = false;
+    v.mesh.visible = true;
+  });
   setRumble(0,0);
   document.getElementById("calmBtn").hidden = true;
   canvas.classList.add("building");
@@ -640,7 +668,7 @@ function endDisaster(){
     const pct = preCount? Math.round(standing/preCount*100) : 0;
     refreshStats();
     if(gameMode === "survival") {
-      const survivors = villagers.length;
+      const survivors = villagers.filter(v => !v.hidden).length;
       const earned = survivors * SURVIVAL_REWARD;
       if(survivors > 0) {
         toast(`☀️ Calm again. <b>${survivors}</b> villagers survived! You earned $${earned}.`);
@@ -754,15 +782,27 @@ function stepDisaster(dt){
     }
     if(gameMode === "survival") {
       for(const v of villagers) {
-        if(v.vel.lengthSq() > 0.1 || v.g.position.y > 0.5) continue;
-        const dx = v.g.position.x - c.x, dz = v.g.position.z - c.y;
-        const r = Math.hypot(dx,dz);
-        if(r > 3.1) continue;
-        const pull = (1 - r/3.1);
-        const gx = Math.round(v.g.position.x + HALF), gz = Math.round(v.g.position.z + HALF);
-        const bx = Math.sign(-dx), bz = Math.sign(-dz);
-        const sheltered = cellMap.has(key(gx+bx, 0, gz)) || cellMap.has(key(gx, 0, gz+bz));
-        if(I * pull * 1.6 > 0.8 && !sheltered) v.vel.set(-dz/r*4*I, 4.5*I*pull, dx/r*4*I);
+        if (v.hidden) continue;
+        if (v.targetPos && !v.hidden) {
+          const dx = v.targetPos.x - v.x, dz = v.targetPos.z - v.z;
+          const dist = Math.hypot(dx, dz);
+          if (dist < 0.2) {
+            v.hidden = true; v.mesh.visible = false;
+            if (!v.targetBlock.hasDoor) {
+              v.targetBlock.hasDoor = true;
+              const door = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.4), new THREE.MeshLambertMaterial({color: 0x3d2314}));
+              door.position.set(0, -0.25, 0.51); 
+              v.targetBlock.mesh.add(door); v.targetBlock.doorMesh = door;
+            }
+          } else {
+            v.x += (dx / dist) * 0.05; v.z += (dz / dist) * 0.05;
+            v.mesh.position.set(v.x, 0.25, v.z);
+            v.mesh.rotation.y = Math.atan2(dx, dz);
+          }
+        } else if (!v.hidden) {
+          v.x += (Math.random()-0.5)*0.2; v.z += (Math.random()-0.5)*0.2;
+          v.mesh.position.set(v.x, 0.25, v.z); v.mesh.rotation.y += 0.5;
+        }
       }
     }
   }
@@ -851,7 +891,7 @@ function makeVillager(color, x, z){
   const ex = exclaimSprite(); ex.position.y = 1.3; ex.visible = false; g.add(ex);
   g.position.set(x,0,z);
   scene.add(g);
-  const v = {g, ex, armL, armR, target:new THREE.Vector2(x,z), speed:0.7, panic:false, phase:Math.random()*9, vel:new THREE.Vector3()};
+  const v = {g, ex, armL, armR, x, z, target:new THREE.Vector2(x,z), speed:0.7, panic:false, phase:Math.random()*9, vel:new THREE.Vector3(), mesh:g};
   villagers.push(v); return v;
 }
 makeVillager(0x9fe3c0, 4.6, -1.5);
@@ -871,23 +911,20 @@ function stepVillagers(dt, t){
     }
     v.ex.visible = v.panic;
     if(gameMode==="survival" && v.panic){
-      v.target.set(0,0);
+      // handled in disaster logic
     } else {
-      const dTarget = new THREE.Vector2(v.target.x - p.x, v.target.y - p.z);
-      if(dTarget.length() < 0.25 || Math.random() < (v.panic?0.02:0.004)){
+      const dTarget = new THREE.Vector2(v.target.x - v.x, v.target.y - v.z);
+      if(dTarget.length() < 0.25 || Math.random() < 0.004){
         const a = Math.random()*Math.PI*2, r = 4.2 + Math.random()*1.6;
         v.target.set(Math.cos(a)*r, Math.sin(a)*r);
       }
+      const d = dTarget.normalize();
+      v.x += d.x*v.speed*dt; v.z += d.y*v.speed*dt;
+      p.set(v.x, Math.abs(Math.sin(t*7+v.phase))*0.05, v.z);
+      v.g.rotation.y = Math.atan2(d.x, d.y);
+      const wave = Math.sin(t*7+v.phase)*0.35;
+      v.armL.rotation.x = wave; v.armR.rotation.x = -wave;
     }
-    const d = new THREE.Vector2(v.target.x - p.x, v.target.y - p.z).normalize();
-    const sp = v.panic ? 2.6 : v.speed;
-    p.x += d.x*sp*dt; p.z += d.y*sp*dt;
-    v.g.rotation.y = Math.atan2(d.x, d.y);
-    p.y = v.panic ? Math.abs(Math.sin(t*16+v.phase))*0.16 : Math.abs(Math.sin(t*7+v.phase))*0.05;
-    const wave = v.panic ? Math.sin(t*20+v.phase)*1.2 : Math.sin(t*7+v.phase)*0.35;
-    v.armL.rotation.x = wave; v.armR.rotation.x = -wave;
-    if(v.panic){ v.armL.rotation.z = 2.6; v.armR.rotation.z = -2.6; }
-    else { v.armL.rotation.z = 0; v.armR.rotation.z = 0; }
   }
 }
 
@@ -1063,6 +1100,8 @@ canvas.addEventListener("pointerup", e=>{
     if(!c) return;
     ensureAudio(); AC.resume();
     if(erasing){ if(c.block){ removeBlock(c.block); blip(300,0.08,0.1); } return; }
+    
+    // Attempt place
     addBlock(c.gx, c.gy, c.gz, currentMat);
     document.getElementById("hint").style.opacity = 0;
   }
@@ -1090,8 +1129,8 @@ document.getElementById("eraser").addEventListener("click", function(){
 
 const DISASTERS = ["quake", "wind", "tornado", "meteor"];
 const DISASTER_ICONS = {"quake":"🫨 Earthquake", "wind":"🌬️ Windstorm", "tornado":"🌪️ Tornado", "meteor":"☄️ Meteor"};
-let nextDisType = "wind";
-let nextDisInt = 1.0;
+let nextDisType = "quake", nextDisInt = 1.0;
+let frames = 0, lastFps = 0;
 
 function rollNextDisaster() {
   nextDisType = DISASTERS[Math.floor(Math.random() * DISASTERS.length)];
@@ -1110,6 +1149,7 @@ function setMode(mode) {
   if(gameMode === "survival") {
     document.body.classList.add("survival-mode");
     document.getElementById("moneySpan").style.display = "inline";
+    document.getElementById("survivalDisaster").style.display = "flex";
     money = 100;
     document.getElementById("statMoney").textContent = money;
     while(blocks.length) removeBlock(blocks[0]);
@@ -1118,6 +1158,7 @@ function setMode(mode) {
   } else {
     document.body.classList.remove("survival-mode");
     document.getElementById("moneySpan").style.display = "none";
+    document.getElementById("survivalDisaster").style.display = "none";
     toast("Creative Mode: unlimited blocks!");
   }
 }
@@ -1199,6 +1240,34 @@ function tick(){
   frames++;
   if(t>lastFps+1){ document.title=`${frames} fps`; frames=0; lastFps=t; }
 }
+
+window.WobbletonAPI = {
+  getMoney: () => money,
+  getVillagers: () => villagers.map(v => ({ gx: v.target.x, gy: 0, gz: v.target.y })), // We don't have gx/gy/gz for villagers natively, wait I need to check how it was returned
+  getVillagers: () => villagers.map(v => ({
+      gx: Math.round(v.x + HALF), 
+      gy: 0, 
+      gz: Math.round(v.z + HALF)
+  })),
+  getNextDisaster: () => ({ type: nextDisType, intensity: nextDisInt }),
+  placeBlock: (gx, gy, gz, mat = "wood") => {
+    const b = addBlock(gx, gy, gz, mat, true); // true for silent (no sound/undo push)
+    if (b) {
+      b.mesh.userData.pop = 0; // Skip animation for tests
+      b.mesh.scale.setScalar(1);
+      // We manually charge money since silent=true skips it in addBlock
+      const cost = MATS[mat].cost;
+      if (gameMode === "survival") {
+         money -= cost;
+         document.getElementById("statMoney").textContent = money;
+      }
+    }
+    return !!b;
+  },
+  triggerWave: () => {
+     if(!disaster) startDisaster(nextDisType, nextDisInt);
+  }
+};
 
 tick();
 })();
