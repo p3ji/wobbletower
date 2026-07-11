@@ -188,7 +188,6 @@
   <div class="logo">🏗️</div>
   <div>
     <h1>Wobbleton<small>tower workshop &amp; calamity range</small></h1>
-    <a href="https://p3ji.github.io/twoplay/" target="_blank" id="promoLink">Try TwoPlay! ➔</a>
   </div>
 </div>
 
@@ -198,7 +197,6 @@
     <span id="moneySpan" style="display:none; color:var(--honey); font-weight:bold;">$<span id="statMoney">100</span></span>
     <span>Blocks <b id="statBlocks">0</b></span><span>Height <b id="statHeight">0</b></span>
   </div>
-  <button id="musicBtn" class="iconbtn" aria-pressed="false" title="Play music" aria-label="Toggle music">🎵</button>
 </div>
 
 <div id="bench" role="toolbar" aria-label="Building materials">
@@ -255,6 +253,7 @@
     <button id="setCreativeBtn" class="modal-btn">Creative Mode</button>
     <button id="setSurvivalBtn" class="modal-btn">Survival Mode</button>
     <button id="setMusicBtn" class="modal-btn">Toggle Music (Off)</button>
+    <a href="https://p3ji.github.io/twoplay/" target="_blank" class="modal-btn" style="text-decoration:none; color:white; background:rgba(255,255,255,0.1); margin-top:0.8rem;">Try TwoPlay! ➔</a>
     <button id="closeSettingsBtn" class="modal-btn primary" style="margin-top:1.4rem">Close</button>
   </div>
 </div>
@@ -598,7 +597,7 @@ meteorMesh.visible = false; scene.add(meteorMesh);
 function startDisaster(type){
   if(disaster) return;
   preCount = blocks.filter(b=>b.state==="sleep").length;
-  if(preCount===0){ toast("Build something first — the sky is politely waiting."); return; }
+  if(preCount===0 && gameMode !== "survival"){ toast("Build something first — the sky is politely waiting."); return; }
   const I = parseFloat(intensityEl.value);
   disaster = {type, t:0, dur: type==="meteor"?12:9, intensity:I};
   if(type==="tornado"){
@@ -1006,9 +1005,6 @@ function musicStep(){
 function toggleMusic(){
   ensureAudio(); AC.resume();
   musicOn = !musicOn;
-  const btn = document.getElementById("musicBtn");
-  btn.setAttribute("aria-pressed", musicOn);
-  btn.title = musicOn ? "Pause music" : "Play music";
   musicGain.gain.setTargetAtTime(musicOn?1:0, AC.currentTime, 0.5);
   if(musicOn && !stepTimer) stepTimer = setInterval(musicStep, 290);
   if(!musicOn && stepTimer){ clearInterval(stepTimer); stepTimer = null; }
@@ -1211,7 +1207,7 @@ document.getElementById("settingsBtn").addEventListener("click", () => {
 document.getElementById("closeSettingsBtn").addEventListener("click", () => { document.getElementById("settingsScreen").style.display = "none"; });
 document.getElementById("setCreativeBtn").addEventListener("click", () => { setMode("creative"); document.getElementById("closeSettingsBtn").click(); });
 document.getElementById("setSurvivalBtn").addEventListener("click", () => { setMode("survival"); document.getElementById("closeSettingsBtn").click(); });
-document.getElementById("setMusicBtn").addEventListener("click", () => { document.getElementById("musicBtn").click(); document.getElementById("setMusicBtn").textContent = "Toggle Music (" + (musicOn ? "On" : "Off") + ")"; });
+document.getElementById("setMusicBtn").addEventListener("click", () => { toggleMusic(); document.getElementById("setMusicBtn").textContent = "Toggle Music (" + (musicOn ? "On" : "Off") + ")"; });
 
 document.getElementById("undoBtn").addEventListener("click", ()=>{
   const b = undoStack.pop();
@@ -1226,8 +1222,6 @@ document.querySelectorAll(".charm[data-dis]").forEach(btn=>{
   btn.addEventListener("click", ()=>{ ensureAudio(); AC.resume(); startDisaster(btn.dataset.dis); });
 });
 document.getElementById("calmBtn").addEventListener("click", endDisaster);
-document.getElementById("musicBtn").addEventListener("click", toggleMusic);
-
 let toastTimer = null;
 function toast(html){
   const t = document.getElementById("toast");
