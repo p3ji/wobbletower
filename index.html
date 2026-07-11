@@ -856,7 +856,6 @@ const pointer = new THREE.Vector2();
 let down = null, dragged = false;
 const pointers = new Map();
 let pinchDist = 0, pinchStartRadius = 0;
-let pinchCenter = {x:0, y:0}, pinchStartTarget = new THREE.Vector3();
 
 canvas.addEventListener("contextmenu", e=>e.preventDefault());
 
@@ -882,14 +881,12 @@ function pickCell(e){
 canvas.addEventListener("pointerdown", e=>{
   pointers.set(e.pointerId, {x: e.clientX, y: e.clientY});
   if(pointers.size === 1){
-    down = {x:e.clientX, y:e.clientY, theta:orbit.theta, phi:orbit.phi, target:orbit.target.clone(), isRight:e.button===2};
+    down = {x:e.clientX, y:e.clientY, theta:orbit.theta, phi:orbit.phi};
     dragged = false;
   } else if(pointers.size === 2){
     const pts = Array.from(pointers.values());
     pinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
     pinchStartRadius = orbit.radius;
-    pinchCenter = {x: (pts[0].x + pts[1].x)/2, y: (pts[0].y + pts[1].y)/2};
-    pinchStartTarget = orbit.target.clone();
     dragged = true;
     down = null;
   }
@@ -904,17 +901,6 @@ canvas.addEventListener("pointermove", e=>{
     if(pinchDist > 0) {
       orbit.radius = Math.max(8, Math.min(120, pinchStartRadius * (pinchDist / dist)));
     }
-    const cx = (pts[0].x + pts[1].x)/2;
-    const cy = (pts[0].y + pts[1].y)/2;
-    const dx = cx - pinchCenter.x;
-    const dy = cy - pinchCenter.y;
-    
-    orbit.target.y = Math.max(-2, Math.min(22, pinchStartTarget.y + dy * 0.035));
-    const rightX = Math.cos(orbit.theta);
-    const rightZ = -Math.sin(orbit.theta);
-    orbit.target.x = Math.max(-10, Math.min(10, pinchStartTarget.x - dx * 0.035 * rightX));
-    orbit.target.z = Math.max(-10, Math.min(10, pinchStartTarget.z - dx * 0.035 * rightZ));
-    
     canvas.classList.add("dragging");
     ghost.visible = false;
     return;
@@ -925,16 +911,8 @@ canvas.addEventListener("pointermove", e=>{
     if(Math.hypot(dx,dy) > 6) dragged = true;
     if(dragged){
       canvas.classList.add("dragging");
-      if(down.isRight){
-        orbit.target.y = Math.max(-2, Math.min(22, down.target.y + dy * 0.035));
-        const rightX = Math.cos(down.theta);
-        const rightZ = -Math.sin(down.theta);
-        orbit.target.x = Math.max(-10, Math.min(10, down.target.x - dx * 0.035 * rightX));
-        orbit.target.z = Math.max(-10, Math.min(10, down.target.z - dx * 0.035 * rightZ));
-      } else {
-        orbit.theta = down.theta - dx*0.008;
-        orbit.phi = Math.max(0.2, Math.min(1.35, down.phi - dy*0.006));
-      }
+      orbit.theta = down.theta - dx*0.008;
+      orbit.phi = Math.max(0.2, Math.min(1.35, down.phi - dy*0.006));
       ghost.visible = false;
       return;
     }
