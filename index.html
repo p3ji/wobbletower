@@ -237,7 +237,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xb7c4ef);          // lavender dusk
 scene.fog = new THREE.Fog(0xb7c4ef, 26, 60);
 
-const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
+const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 300);
 const orbit = {theta: Math.PI*0.22, phi: Math.PI*0.34, radius: 19, target:new THREE.Vector3(0,2.4,0)};
 function applyCamera(shakeAmp=0){
   const {theta, phi, radius, target} = orbit;
@@ -247,6 +247,8 @@ function applyCamera(shakeAmp=0){
     target.z + radius*Math.sin(phi)*Math.cos(theta) + (Math.random()-0.5)*shakeAmp
   );
   camera.lookAt(target);
+  scene.fog.near = radius + 7;
+  scene.fog.far = radius + 41;
 }
 
 scene.add(new THREE.HemisphereLight(0xfdf1de, 0x8f86b8, 0.85));
@@ -896,7 +898,7 @@ canvas.addEventListener("pointermove", e=>{
     const pts = Array.from(pointers.values());
     const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
     if(pinchDist > 0) {
-      orbit.radius = Math.max(8, Math.min(45, pinchStartRadius * (pinchDist / dist)));
+      orbit.radius = Math.max(8, Math.min(120, pinchStartRadius * (pinchDist / dist)));
     }
     const cx = (pts[0].x + pts[1].x)/2;
     const cy = (pts[0].y + pts[1].y)/2;
@@ -960,7 +962,7 @@ canvas.addEventListener("pointercancel", e=>{
 });
 canvas.addEventListener("wheel", e=>{
   e.preventDefault();
-  orbit.radius = Math.max(8, Math.min(34, orbit.radius + e.deltaY*0.015));
+  orbit.radius = Math.max(8, Math.min(120, orbit.radius + e.deltaY*0.015));
 },{passive:false});
 
 document.querySelectorAll(".mat[data-mat]").forEach(btn=>{
