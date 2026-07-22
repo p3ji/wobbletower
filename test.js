@@ -1,0 +1,1063 @@
+
+/* =========================================================================
+   WOBBLETON — a cozy tower simulator
+   Architecture (single file, five modules):
+     1. World      — scene, lights, island, clouds, camera orbit
+     2. Blocks     — grid registry, materials, ghost preview, presets
+     3. Physics    — lightweight rigid-body: sleep/wake, gravity, support
+     4. Disasters  — quake / wind / tornado / meteor + particles
+     5. Life       — boxy villagers, procedural music, UI glue
+   ========================================================================= */
+(() => {
+"use strict";
+
+/* ---------------- 1. WORLD ---------------- */
+const canvas = document.getElementById("scene");
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const currentSkyColor = new THREE.Color(0x87CEEB);
+const scene = new THREE.Scene();
+scene.background = currentSkyColor;
+scene.fog = new THREE.FogExp2(0x87CEEB, 0.02);
+
+const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 300);
+const orbit = {theta: Math.PI*0.22, phi: Math.PI*0.34, radius: 19, target:new THREE.Vector3(0,2.4,0)};
+function applyCamera(shakeAmp=0){
+  const {theta, phi, radius, target} = orbit;
+  camera.position.set(
+    target.x + radius*Math.sin(phi)*Math.sin(theta) + (Math.random()-0.5)*shakeAmp,
+    target.y + radius*Math.cos(phi)                 + (Math.random()-0.5)*shakeAmp,
+    target.z + radius*Math.sin(phi)*Math.cos(theta) + (Math.random()-0.5)*shakeAmp
+  );
+  camera.lookAt(target);
+  scene.fog.near = radius + 7;
+  scene.fog.far = radius + 41;
+}
+
+scene.add(new THREE.HemisphereLight(0xfdf1de, 0x8f86b8, 0.85));
+const sun = new THREE.DirectionalLight(0xffe3b3, 1.0);
+sun.position.set(9, 14, 6);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = sun.shadow.camera.bottom = -12;
+sun.shadow.camera.right = sun.shadow.camera.top = 12;
+scene.add(sun);
+
+/* Floating meadow island */
+const island = new THREE.Group(); scene.add(island);
+function lamb(c){ return new THREE.MeshLambertMaterial({color:c}); }
+const topGrass = new THREE.Mesh(new THREE.CylinderGeometry(6.4, 6.1, 0.7, 9), lamb(0x9fce7c));
+topGrass.position.y = -0.35; topGrass.receiveShadow = true; island.add(topGrass);
+const soil = new THREE.Mesh(new THREE.CylinderGeometry(6.1, 3.4, 2.6, 9), lamb(0x8a5a3b));
+soil.position.y = -2.0; island.add(soil);
+const soilTip = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 0.7, 2.2, 9), lamb(0x74492e));
+soilTip.position.y = -4.4; island.add(soilTip);
+
+/* Tiny props: trees, flowers, pebbles around the rim */
+function tree(x, z, s=1){
+  const g = new THREE.Group();
+  const trunk = new THREE.Mesh(new THREE.BoxGeometry(0.24*s, 0.7*s, 0.24*s), lamb(0x8a5a3b));
+  trunk.position.y = 0.35*s; trunk.castShadow = true; g.add(trunk);
+  const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.85*s, 0.85*s, 0.85*s), lamb(0x76b56a));
+  leaf.position.y = 1.0*s; leaf.rotation.y = Math.random(); leaf.castShadow = true; g.add(leaf);
+  const leaf2 = new THREE.Mesh(new THREE.BoxGeometry(0.5*s, 0.5*s, 0.5*s), lamb(0x8ecb7f));
+  leaf2.position.y = 1.5*s; leaf2.rotation.y = Math.random(); leaf2.castShadow = true; g.add(leaf2);
+  g.position.set(x, 0, z); island.add(g); return g;
+}
+tree(5.2, 1.2, 1.1); tree(-5.0, -2.0, 0.9); tree(-4.4, 3.6, 1.25); tree(2.2, -5.2, 0.85);
+for(let i=0;i<14;i++){
+  const a = Math.random()*Math.PI*2, r = 4.4 + Math.random()*1.4;
+  const f = new THREE.Mesh(new THREE.BoxGeometry(0.14,0.14,0.14),
+     lamb([0xf4a6b0,0xf5b85c,0xffffff,0xb9a6f4][i%4]));
+  f.position.set(Math.cos(a)*r, 0.07, Math.sin(a)*r); island.add(f);
+}
+
+/* Drifting clouds */
+const clouds = [];
+for(let i=0;i<6;i++){
+  const c = new THREE.Group();
+  for(let j=0;j<3;j++){
+    const puff = new THREE.Mesh(new THREE.BoxGeometry(1.4-0.3*j, 0.7, 1.0),
+      new THREE.MeshLambertMaterial({color:0xffffff, transparent:true, opacity:0.92}));
+    puff.position.set(j*0.9-0.9, j*0.18, (Math.random()-0.5)*0.4); c.add(puff);
+  }
+  c.position.set((Math.random()-0.5)*36, 7+Math.random()*5, (Math.random()-0.5)*36);
+  c.userData.speed = 0.15 + Math.random()*0.25;
+  scene.add(c); clouds.push(c);
+}
+
+/* ---------------- 2. BLOCKS ---------------- */
+let gameMode = "creative";
+let money = 100;
+const SURVIVAL_REWARD = 30;
+
+const MATS = {
+  straw:{color:0xe8cf7a, mass:0.4, grip:0.55, name:"Straw", cost:5},
+  wood: {color:0xc98a54, mass:1.0, grip:1.0,  name:"Wood", cost:15},
+  brick:{color:0xd96f5e, mass:1.6, grip:1.5,  name:"Brick", cost:40},
+  stone:{color:0x9aa3b2, mass:2.4, grip:2.2,  name:"Stone", cost:80},
+  glass:{color:0xb5e3ee, mass:0.9, grip:0.7,  name:"Glass", fragile:true, cost:20},
+};
+for(const k in MATS){
+  MATS[k].material = new THREE.MeshLambertMaterial({
+    color:MATS[k].color, transparent:k==="glass", opacity:k==="glass"?0.65:1
+  });
+}
+const GRID = 7, HALF = (GRID-1)/2, MAXY = 14;
+const blockGeo = new THREE.BoxGeometry(0.96, 0.96, 0.96);
+const blocks = [];                 // every block object (sleeping, awake, settled)
+const cellMap = new Map();         // "gx,gy,gz" -> block (sleeping only)
+const key = (x,y,z)=>`${x},${y},${z}`;
+const undoStack = [];
+
+function addBlock(gx, gy, gz, matName, silent){
+  if(gx<0||gx>=GRID||gz<0||gz>=GRID||gy<0||gy>=MAXY) return null;
+  if(cellMap.has(key(gx,gy,gz))) return null;
+  const m = MATS[matName];
+  if(!silent && gameMode === "survival") {
+    if(money < m.cost) {
+      toast("Not enough funds!");
+      return null;
+    }
+    money -= m.cost;
+    document.getElementById("statMoney").textContent = money;
+  }
+  const mesh = new THREE.Mesh(blockGeo, m.material.clone());
+  mesh.castShadow = mesh.receiveShadow = true;
+  mesh.position.set(gx-HALF, gy+0.5, gz-HALF);
+  scene.add(mesh);
+  const b = {gx,gy,gz, mat:matName, mesh, state:"sleep",
+             vel:new THREE.Vector3(), ang:new THREE.Vector3()};
+  blocks.push(b); cellMap.set(key(gx,gy,gz), b);
+  if(!silent){ undoStack.push(b); popIn(mesh); playPlop(); }
+  refreshStats();
+  return b;
+}
+function removeBlock(b){
+  cellMap.delete(key(b.gx,b.gy,b.gz));
+  scene.remove(b.mesh);
+  const i = blocks.indexOf(b); if(i>=0) blocks.splice(i,1);
+  if(gameMode === "survival" && b.state === "sleep") {
+    money += Math.floor(MATS[b.mat].cost / 2);
+    document.getElementById("statMoney").textContent = money;
+  }
+  refreshStats();
+}
+function popIn(mesh){ mesh.scale.setScalar(0.2); mesh.userData.pop = 1; }
+
+function refreshStats(){
+  const standing = blocks.filter(b=>b.state==="sleep");
+  document.getElementById("statBlocks").textContent = standing.length;
+  const h = standing.reduce((m,b)=>Math.max(m,b.gy+1), 0);
+  document.getElementById("statHeight").textContent = h;
+}
+
+/* Ghost preview cube */
+const ghost = new THREE.Mesh(blockGeo, new THREE.MeshLambertMaterial({
+  color:0xffffff, transparent:true, opacity:0.35}));
+ghost.visible = false; scene.add(ghost);
+
+/* Presets */
+const PRESETS = {
+  lighthouse(){
+    const out=[];
+    for(let x=2;x<=4;x++)for(let z=2;z<=4;z++)for(let y=0;y<2;y++) out.push([x,y,z,"stone"]);
+    for(let x=2;x<=4;x++)for(let z=2;z<=4;z++)for(let y=2;y<6;y++) out.push([x,y,z,"brick"]);
+    for(let x=2;x<=4;x++)for(let z=2;z<=4;z++) out.push([x,6,z,"glass"]);
+    out.push([3,7,3,"wood"]);
+    return out;
+  },
+  wizard(){
+    const out=[];
+    for(let x=2;x<=3;x++)for(let z=3;z<=4;z++)for(let y=0;y<5;y++) out.push([x,y,z,"wood"]);
+    for(let x=2;x<=3;x++)for(let z=3;z<=4;z++) out.push([x,5,z,"glass"]);
+    out.push([2,6,3,"straw"],[3,6,4,"straw"],[2,6,4,"straw"],[3,6,3,"straw"],[2,7,3,"straw"]);
+    return out;
+  },
+  castle(){
+    const out=[];
+    for(let x=1;x<=5;x++)for(let z=1;z<=5;z++){
+      const wall = (x===1||x===5||z===1||z===5);
+      const corner = (x===1||x===5)&&(z===1||z===5);
+      if(!wall) continue;
+      const h = corner?5:3;
+      for(let y=0;y<h;y++){
+        if(x===3&&z===5&&y<2){ out.push([x,y,z,"wood"]); continue; } // gate
+        out.push([x,y,z,"stone"]);
+      }
+      if(corner) out.push([x,5,z,"brick"]);
+    }
+    return out;
+  }
+};
+function loadPreset(name){
+  clearAll();
+  for(const [x,y,z,m] of PRESETS[name]()) addBlock(x,y,z,m,true);
+  blocks.forEach(b=>popIn(b.mesh));
+  toast(`Loaded <b>${{lighthouse:"Little Lighthouse",wizard:"Wobbly Wizard Spire",castle:"Castle Keep"}[name]}</b> — give it a shake!`);
+}
+function clearAll(){
+  [...blocks].forEach(removeBlock);
+  undoStack.length = 0;
+}
+
+/* ---------------- 3. PHYSICS ----------------
+   A cozy-sized rigid body sim. Blocks "sleep" (locked to the grid) until a
+   force beats their grip. Grip = material stickiness × (1 + weight pressing
+   down from above) — that's static friction, in toy form. Awake blocks get
+   gravity, velocity, tumbling, a soft floor bounce and pushes off each other.
+------------------------------------------------ */
+const GRAV = -14;
+function loadAbove(b){
+  let m = 0;
+  for(let y=b.gy+1;y<MAXY;y++){
+    const o = cellMap.get(key(b.gx,y,b.gz));
+    if(!o) break; m += MATS[o.mat].mass;
+  }
+  return m;
+}
+function gripOf(b){ return MATS[b.mat].grip * (1 + 0.35*loadAbove(b)); }
+function wake(b, vx=0, vy=0, vz=0){
+  if(b.state!=="sleep") return;
+  cellMap.delete(key(b.gx,b.gy,b.gz));
+  b.state = "awake";
+  b.vel.set(vx, vy, vz);
+  b.ang.set((Math.random()-.5)*3, (Math.random()-.5)*3, (Math.random()-.5)*3);
+}
+function supportPass(){ // any sleeping block with nothing under it wakes up
+  let changed = true;
+  while(changed){
+    changed = false;
+    for(const b of blocks){
+      if(b.state!=="sleep" || b.gy===0) continue;
+      if(!cellMap.has(key(b.gx, b.gy-1, b.gz))){
+        wake(b, (Math.random()-.5)*0.6, 0, (Math.random()-.5)*0.6);
+        changed = true;
+      }
+    }
+  }
+}
+function stepPhysics(dt){
+  supportPass();
+  const awake = blocks.filter(b=>b.state==="awake");
+  for(const b of awake){
+    b.vel.y += GRAV*dt;
+    b.mesh.position.addScaledVector(b.vel, dt);
+    b.mesh.rotation.x += b.ang.x*dt; b.mesh.rotation.y += b.ang.y*dt; b.mesh.rotation.z += b.ang.z*dt;
+    // floor — but only while still over the island
+    const hr = Math.hypot(b.mesh.position.x, b.mesh.position.z);
+    if(hr < 6.2 && b.mesh.position.y < 0.48){
+      const impact = -b.vel.y;
+      b.mesh.position.y = 0.48;
+      if(MATS[b.mat].fragile && impact > 5){ shatter(b); continue; }
+      b.vel.y = impact*0.22;
+      b.vel.x *= 0.78; b.vel.z *= 0.78;
+      b.ang.multiplyScalar(0.6);
+      if(b.vel.length() < 0.35){ b.state="settled"; b.vel.set(0,0,0); b.ang.set(0,0,0); playThud(); }
+    }
+    // slid past the meadow's edge → tumble into the sky-sea
+    if(hr >= 6.2) b.state = "falling";
+  }
+  // awake/falling vs everything: soft sphere pushes (cheap but convincing)
+  const movers = blocks.filter(b=>b.state==="awake"||b.state==="falling");
+  for(const a of movers){
+    for(const b of blocks){
+      if(a===b) continue;
+      const d = new THREE.Vector3().subVectors(a.mesh.position, b.mesh.position);
+      const dist = d.length();
+      if(dist > 0.001 && dist < 0.95){
+        d.normalize();
+        const push = (0.95-dist);
+        a.mesh.position.addScaledVector(d, push*0.55);
+        a.vel.addScaledVector(d, push*7);
+        if(b.state==="sleep" && a.vel.length()*MATS[a.mat].mass > gripOf(b)*2.4){
+          wake(b, d.x*-1.4, 0.6, d.z*-1.4);   // knocked loose by flying debris
+        }
+        if(MATS[a.mat].fragile && a.vel.length() > 5.5){ shatter(a); break; }
+      }
+    }
+  }
+  // remove far-fallen blocks
+  for(const b of [...blocks]){
+    if(b.state==="falling"){
+      b.vel.y += GRAV*dt;
+      b.mesh.position.addScaledVector(b.vel, dt);
+      b.mesh.rotation.x += 2*dt; b.mesh.rotation.z += 2*dt;
+      if(b.mesh.position.y < -20) removeBlock(b);
+    }
+  }
+}
+
+/* ---------------- particles ---------------- */
+const particles = [];
+const pGeo = new THREE.BoxGeometry(0.16,0.16,0.16);
+function spawnParticles(pos, color, n, spread=4, up=4){
+  for(let i=0;i<n;i++){
+    const p = new THREE.Mesh(pGeo, new THREE.MeshLambertMaterial({color}));
+    p.position.copy(pos);
+    p.userData = {vel:new THREE.Vector3((Math.random()-.5)*spread, Math.random()*up, (Math.random()-.5)*spread), life:1};
+    scene.add(p); particles.push(p);
+  }
+}
+function shatter(b){
+  spawnParticles(b.mesh.position, 0xd7f2f8, 12, 5, 5);
+  playShatter();
+  removeBlock(b);
+}
+function stepParticles(dt){
+  for(let i=particles.length-1;i>=0;i--){
+    const p = particles[i], u = p.userData;
+    u.vel.y += GRAV*0.6*dt;
+    p.position.addScaledVector(u.vel, dt);
+    p.rotation.x += 4*dt; p.rotation.y += 4*dt;
+    u.life -= dt*0.8;
+    p.scale.setScalar(Math.max(0.01,u.life));
+    if(u.life<=0 || p.position.y<-15){ scene.remove(p); particles.splice(i,1); }
+  }
+}
+
+/* ---------------- 4. DISASTERS ---------------- */
+let disaster = null;   // {type, t, dur, intensity, ...}
+let preCount = 0;
+const intensityEl = document.getElementById("intensity");
+
+const funnel = new THREE.Mesh(
+  new THREE.ConeGeometry(2.1, 7, 10, 1, true),
+  new THREE.MeshLambertMaterial({color:0xd9d3ea, transparent:true, opacity:0.5, side:THREE.DoubleSide}));
+funnel.position.y = 3.5; funnel.rotation.x = Math.PI; funnel.visible = false; scene.add(funnel);
+
+const meteorMesh = new THREE.Mesh(new THREE.DodecahedronGeometry(0.55),
+  new THREE.MeshLambertMaterial({color:0x7a4a3a, emissive:0xff5a2a, emissiveIntensity:0.7}));
+meteorMesh.visible = false; scene.add(meteorMesh);
+
+function startDisaster(type){
+  if(disaster) return;
+  preCount = blocks.filter(b=>b.state==="sleep").length;
+  if(preCount===0 && gameMode !== "survival"){ toast("Build something first — the sky is politely waiting."); return; }
+  const I = parseFloat(intensityEl.value);
+  disaster = {type, t:0, dur: type==="meteor"?12:9, intensity:I};
+  if(type==="tornado"){
+    funnel.visible = true;
+    disaster.center = new THREE.Vector2(-6, -6);
+  }
+  if(type==="meteor"){
+    disaster.hits = 0;
+    scheduleMeteor(disaster);
+  }
+  villagers.forEach(v => {
+    v.panic = true;
+    v.hidden = false;
+    v.mesh.visible = true;
+    let bestDist = Infinity;
+    let target = null;
+    let targetB = null;
+    for (const b of blocks) {
+      if (b.state !== "sleep" || b.gy > 1) continue; 
+      const dist = Math.hypot(b.gx - HALF - v.x, b.gz - HALF - v.z);
+      if (dist < bestDist) {
+         bestDist = dist;
+         target = {x: b.gx - HALF, z: b.gz - HALF};
+         targetB = b;
+      }
+    }
+    v.targetPos = target;
+    v.targetBlock = targetB;
+  });
+  document.querySelectorAll(".charm[data-dis]").forEach(b=>b.disabled=true);
+  document.getElementById("calmBtn").hidden = false;
+  canvas.classList.remove("building");
+  setRumble(type==="wind"?0:0.5, type==="wind"||type==="tornado"?0.6:0.1);
+  toast({quake:"🫨 The ground grumbles awake…", wind:"🌬️ A big wind clears its throat…",
+         tornado:"🌪️ A twisty visitor drops by…", meteor:"☄️ Something is falling out of the sky!"}[type]);
+}
+function scheduleMeteor(d){
+  const tx = (Math.random()*GRID|0)-HALF, tz = (Math.random()*GRID|0)-HALF;
+  d.meteor = {pos:new THREE.Vector3(tx+8, 16, tz-8), vel:new THREE.Vector3(-6.2,-11,6.2).multiplyScalar(0.9+0.3*d.intensity), target:new THREE.Vector3(tx,0.5,tz)};
+  meteorMesh.visible = true;
+}
+function endDisaster(){
+  if(!disaster) return;
+  const type = disaster.type;
+  disaster = null;
+  funnel.visible = false; meteorMesh.visible = false;
+  island.position.set(0,0,0);
+  for(const b of blocks) {
+    if(b.state==="sleep") b.mesh.position.set(b.gx-HALF, b.gy+0.5, b.gz-HALF);
+    if(b.hasDoor && b.doorMesh) {
+      b.mesh.remove(b.doorMesh);
+      b.hasDoor = false;
+    }
+  }
+  villagers.forEach(v=>{
+    v.panic = false;
+    v.hidden = false;
+    v.mesh.visible = true;
+  });
+  setRumble(0,0);
+  document.getElementById("calmBtn").hidden = true;
+  canvas.classList.add("building");
+  // let rubble settle, then report
+  setTimeout(()=>{
+    document.querySelectorAll(".charm[data-dis]").forEach(b=>b.disabled=false);
+    const standing = blocks.filter(b=>b.state==="sleep").length;
+    const pct = preCount? Math.round(standing/preCount*100) : 0;
+    refreshStats();
+    if(gameMode === "survival") {
+      const survivors = villagers.filter(v => !v.hidden).length;
+      const earned = survivors * SURVIVAL_REWARD;
+      if(survivors > 0) {
+        money += earned;
+        let msg = `☀️ Calm again. <b>${survivors}</b> villagers survived! You earned $${earned}.`;
+        
+        // Immigration: add 1 villager if we have shelter capacity and aren't overpopulated (max 15)
+        if(villagers.length < blocks.length / 2 && villagers.length < 15) {
+          makeVillager(Math.random()*0xffffff, (Math.random()-0.5)*8, (Math.random()-0.5)*8);
+          msg += ` A new villager joined!`;
+        }
+        
+        toast(msg);
+        document.getElementById("statMoney").textContent = money;
+      } else {
+        toast(`💀 Disaster passed... but no one survived.`);
+      }
+      rollNextDisaster();
+      waveTimer = 30; // reset timer
+      targetSkyColor = skyColors.day;
+    } else {
+      if(pct>=70){
+        toast(`☀️ Calm again. <b>${pct}%</b> of your tower stood proud — sturdy work!`);
+        confetti();
+        playChime(true);
+      } else if(pct>=30){
+        toast(`☀️ Calm again. <b>${pct}%</b> survived. A wobble, not a tragedy.`);
+        playChime(false);
+      } else {
+        toast(`☀️ Calm again. <b>${pct}%</b> survived… the villagers suggest more stone.`);
+        playChime(false);
+      }
+    }
+  }, 1800);
+}
+function confetti(){
+  for(let i=0;i<3;i++){
+    setTimeout(()=>spawnParticles(new THREE.Vector3((Math.random()-.5)*4, 6+Math.random()*2, (Math.random()-.5)*4),
+      [0xf5b85c,0x9fe3c0,0xf4a6b0][i], 14, 3, 1), i*160);
+  }
+}
+
+let shakeAmp = 0;
+function stepDisaster(dt){
+  if(!disaster) { shakeAmp *= 0.9; island.position.x *= 0.8; island.position.z *= 0.8; return; }
+  const d = disaster; d.t += dt;
+  const I = d.intensity;
+  const ramp = Math.min(1, d.t/1.2) * Math.min(1, (d.dur-d.t)/1.2); // ease in/out
+
+  if (gameMode === "survival") targetSkyColor = skyColors[d.type] || skyColors.night;
+  
+  if(d.type==="quake"){
+    const s = 0.09*I*ramp;
+    island.position.x = Math.sin(d.t*34)*s;
+    island.position.z = Math.cos(d.t*27)*s;
+    shakeAmp = 0.10*I*ramp;
+    for(const b of blocks){
+      if(b.state!=="sleep") continue;
+      b.mesh.position.x = b.gx-HALF + island.position.x;   // ride the shake
+      b.mesh.position.z = b.gz-HALF + island.position.z;
+      const jolt = I*ramp*(0.9+Math.random()*0.6)*(1 + b.gy*0.16); // whips harder up top
+      if(jolt > gripOf(b)*1.05){
+        wake(b, Math.sin(d.t*34)*2.4*I, 0.4, Math.cos(d.t*27)*2.4*I);
+      }
+    }
+    if(gameMode === "survival") {
+      for(const v of villagers) {
+        if(v.vel.lengthSq() > 0.1 || v.g.position.y > 0.5) continue;
+        const jolt = I*ramp*(0.9+Math.random()*0.6);
+        if(jolt > 1.2) v.vel.set(Math.sin(d.t*34)*2*I, 1.0, Math.cos(d.t*27)*2*I);
+      }
+    }
+  }
+  if(d.type==="wind"){
+    const gust = 0.55 + 0.45*Math.sin(d.t*1.7) * Math.sin(d.t*0.6+1);
+    setRumble(0, 0.35 + 0.4*gust*ramp);
+    for(const b of blocks){
+      if(b.state==="sleep"){
+        const sheltered = cellMap.has(key(b.gx+1, b.gy, b.gz)); // block on windward side
+        const push = I*gust*ramp*(1 + b.gy*0.13)*(sheltered?0.25:1);
+        if(push > gripOf(b)*0.95) wake(b, -3.2*I*gust, 0.5, (Math.random()-.5));
+      } else if(b.state==="awake"){
+        b.vel.x -= 5.5*I*gust*dt;   // debris sails downwind
+      }
+    }
+    if(gameMode === "survival") {
+      for(const v of villagers) {
+        if(v.vel.lengthSq() > 0.1 || v.g.position.y > 0.5) continue;
+        const gx = Math.round(v.g.position.x + HALF), gz = Math.round(v.g.position.z + HALF);
+        const sheltered = cellMap.has(key(gx+1, 0, gz)) || cellMap.has(key(gx+1, 1, gz)) || cellMap.has(key(gx+2, 0, gz));
+        const push = I * gust * ramp * (sheltered ? 0.25 : 1);
+        if(push > 0.6) v.vel.set(-3.2 * I * gust, 1.5, (Math.random() - 0.5));
+      }
+    }
+    for(const p of particles) p.userData.vel.x -= 3*I*gust*dt;
+  }
+  if(d.type==="tornado"){
+    // funnel wanders across the meadow
+    const c = d.center;
+    c.x += (Math.sin(d.t*0.7)*3.5 - c.x + 1.2*dt*10)*dt*0.6 + dt*1.1;
+    c.y += (Math.cos(d.t*0.5)*3.0 - c.y)*dt*0.6 + dt*0.9;
+    funnel.position.set(c.x, 3.5, c.y);
+    funnel.rotation.y += dt*9;
+    funnel.scale.setScalar(0.9+0.1*Math.sin(d.t*11));
+    shakeAmp = 0.04*I;
+    if(Math.random()<0.35) spawnParticles(new THREE.Vector3(c.x,0.3,c.y), 0xb9a988, 1, 2, 3);
+    for(const b of blocks){
+      const dx = b.mesh.position.x - c.x, dz = b.mesh.position.z - c.y;
+      const r = Math.hypot(dx,dz);
+      if(r > 3.1) continue;
+      const pull = (1 - r/3.1);
+      if(b.state==="sleep"){
+        if(I*pull*(1.6 + b.gy*0.1) > gripOf(b)){
+          wake(b, -dz/r*4*I, 3.5*I*pull, dx/r*4*I);  // fling into the swirl, upward!
+        }
+      } else if(b.state==="awake"){
+        b.vel.x += (-dz/Math.max(r,.4)*8 - dx*2) * pull * dt * I;
+        b.vel.z += ( dx/Math.max(r,.4)*8 - dz*2) * pull * dt * I;
+        b.vel.y += 9*pull*dt*I;
+      }
+    }
+  }
+  if(d.type==="meteor" && d.meteor){
+    const m = d.meteor;
+    m.pos.addScaledVector(m.vel, dt);
+    meteorMesh.position.copy(m.pos);
+    meteorMesh.rotation.x += 6*dt; meteorMesh.rotation.y += 4*dt;
+    if(Math.random()<0.7) spawnParticles(m.pos, 0xffa04a, 1, 1, 0.5);
+    // impact?
+    let boom = m.pos.y <= 0.4;
+    for(const b of blocks){
+      if(b.state!=="sleep") continue;
+      if(m.pos.distanceTo(b.mesh.position) < 0.85){ boom = true; break; }
+    }
+    if(boom){
+      playBoom(); shakeAmp = 0.5;
+      spawnParticles(m.pos, 0xff7a3a, 22, 8, 8);
+      spawnParticles(m.pos, 0x8a5a3b, 14, 6, 6);
+      for(const b of [...blocks]){
+        const dist = m.pos.distanceTo(b.mesh.position);
+        if(dist < 2.6*I){
+          const dir = new THREE.Vector3().subVectors(b.mesh.position, m.pos).normalize();
+          if(b.state==="sleep") wake(b, dir.x*8*I/(0.5+dist), 4*I/(0.5+dist), dir.z*8*I/(0.5+dist));
+          else b.vel.addScaledVector(dir, 8*I/(0.5+dist));
+          if(MATS[b.mat].fragile) shatter(b);
+        }
+      }
+      if(gameMode === "survival") {
+        for(const v of villagers) {
+          if(v.vel.lengthSq() > 0.1 || v.g.position.y > 0.5) continue;
+          const dist = m.pos.distanceTo(v.g.position);
+          if(dist < 3.0*I) {
+             const gx = Math.round(v.g.position.x + HALF), gz = Math.round(v.g.position.z + HALF);
+             const sheltered = cellMap.has(key(gx, 1, gz)) || cellMap.has(key(gx, 2, gz));
+             if(!sheltered) {
+                const dir = new THREE.Vector3().subVectors(v.g.position, m.pos).normalize();
+                v.vel.set(dir.x*8*I/(0.5+dist), 5*I/(0.5+dist), dir.z*8*I/(0.5+dist));
+             }
+          }
+        }
+      }
+      meteorMesh.visible = false; d.meteor = null;
+      d.hits++;
+      if(d.hits < Math.round(2*I) && d.t < d.dur-3) setTimeout(()=>{ if(disaster===d) scheduleMeteor(d); }, 1400);
+    }
+  }
+
+  if(gameMode === "survival") {
+    for(const v of villagers) {
+      if (v.hidden) continue;
+      if (v.targetPos && !v.hidden) {
+        const dx = v.targetPos.x - v.x, dz = v.targetPos.z - v.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 0.2) {
+          v.hidden = true; v.mesh.visible = false;
+          if (!v.targetBlock.hasDoor) {
+            v.targetBlock.hasDoor = true;
+            const door = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.4), new THREE.MeshLambertMaterial({color: 0x3d2314}));
+            door.position.set(0, -0.25, 0.51); 
+            v.targetBlock.mesh.add(door); v.targetBlock.doorMesh = door;
+          }
+        } else {
+          v.x += (dx / dist) * 0.05; v.z += (dz / dist) * 0.05;
+          v.mesh.position.set(v.x, 0.25, v.z);
+          v.mesh.rotation.y = Math.atan2(dx, dz);
+        }
+      } else if (!v.hidden) {
+        v.x += (Math.random()-0.5)*0.2; v.z += (Math.random()-0.5)*0.2;
+        v.mesh.position.set(v.x, 0.25, v.z); v.mesh.rotation.y += 0.5;
+      }
+    }
+  }
+
+  shakeAmp *= 0.94;
+  if(d.t >= d.dur) endDisaster();
+}
+
+/* ---------------- 5a. VILLAGERS ---------------- */
+function faceTexture(){
+  const cv = document.createElement("canvas"); cv.width = cv.height = 64;
+  const g = cv.getContext("2d");
+  g.fillStyle = "#2e2440";
+  g.beginPath(); g.arc(20,26,4,0,7); g.arc(44,26,4,0,7); g.fill();
+  g.lineWidth = 3; g.strokeStyle = "#2e2440";
+  g.beginPath(); g.arc(32,36,7,0.15*Math.PI,0.85*Math.PI); g.stroke();
+  g.fillStyle = "rgba(244,166,176,.8)";
+  g.beginPath(); g.arc(14,36,4,0,7); g.arc(50,36,4,0,7); g.fill();
+  return new THREE.CanvasTexture(cv);
+}
+function exclaimSprite(){
+  const cv = document.createElement("canvas"); cv.width=64; cv.height=64;
+  const g = cv.getContext("2d");
+  g.fillStyle = "#f5b85c"; g.font = "bold 52px sans-serif"; g.textAlign="center";
+  g.fillText("!", 32, 50);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv), transparent:true}));
+  sp.scale.set(0.5,0.5,1); return sp;
+}
+const villagers = [];
+function makeVillager(color, x, z){
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.42,0.5,0.32), lamb(color));
+  body.position.y = 0.25; body.castShadow = true; g.add(body);
+  const headMat = [lamb(0xf7d9b8),lamb(0xf7d9b8),lamb(0xf7d9b8),lamb(0xf7d9b8),
+    new THREE.MeshLambertMaterial({color:0xf7d9b8, map:faceTexture()}), lamb(0xf7d9b8)];
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.4,0.36,0.36), headMat);
+  head.position.y = 0.68; head.castShadow = true; g.add(head);
+  const hat = new THREE.Mesh(new THREE.BoxGeometry(0.44,0.12,0.4), lamb(color));
+  hat.position.y = 0.9; g.add(hat);
+  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.1,0.3,0.1), lamb(color));
+  armL.position.set(-0.28,0.32,0); g.add(armL);
+  const armR = armL.clone(); armR.position.x = 0.28; g.add(armR);
+  const ex = exclaimSprite(); ex.position.y = 1.3; ex.visible = false; g.add(ex);
+  g.position.set(x,0,z);
+  scene.add(g);
+  const v = {g, ex, armL, armR, x, z, target:new THREE.Vector2(x,z), speed:0.7, panic:false, phase:Math.random()*9, vel:new THREE.Vector3(), mesh:g};
+  villagers.push(v); return v;
+}
+function initVillagers() {
+  villagers.forEach(v => scene.remove(v.mesh));
+  villagers.length = 0;
+  const count = gameMode === "survival" ? 2 : 6;
+  const colors = [0x9fe3c0, 0xd1a98a, 0x8ab9d1, 0xebd988, 0x86c290, 0xba88eb];
+  for (let i = 0; i < count; i++) {
+    const angle = (i / count) * Math.PI * 2;
+    makeVillager(colors[i % colors.length] || Math.random()*0xffffff, Math.cos(angle)*4, Math.sin(angle)*4);
+  }
+}
+initVillagers();
+function stepVillagers(dt, t){
+  for(let i=villagers.length-1; i>=0; i--){
+    const v = villagers[i];
+    const p = v.g.position;
+    if(v.vel.lengthSq() > 0.1 || p.y > 0.3) {
+      v.vel.y -= 9.8*dt;
+      p.addScaledVector(v.vel, dt);
+      v.g.rotation.x += dt*4; v.g.rotation.z += dt*3;
+      if(p.y < -12) { scene.remove(v.g); villagers.splice(i,1); }
+      continue;
+    }
+    v.ex.visible = v.panic;
+    if(gameMode==="survival" && v.panic){
+      // handled in disaster logic
+    } else {
+      const dTarget = new THREE.Vector2(v.target.x - v.x, v.target.y - v.z);
+      if(dTarget.length() < 0.25 || Math.random() < 0.004){
+        const a = Math.random()*Math.PI*2, r = 4.2 + Math.random()*1.6;
+        v.target.set(Math.cos(a)*r, Math.sin(a)*r);
+      }
+      const d = dTarget.normalize();
+      v.x += d.x*v.speed*dt; v.z += d.y*v.speed*dt;
+      p.set(v.x, Math.abs(Math.sin(t*7+v.phase))*0.05, v.z);
+      v.g.rotation.y = Math.atan2(d.x, d.y);
+      const wave = Math.sin(t*7+v.phase)*0.35;
+      v.armL.rotation.x = wave; v.armR.rotation.x = -wave;
+    }
+  }
+}
+
+/* ---------------- 5b. MUSIC & SOUND (Web Audio, no files) ---------------- */
+let AC = null, master, musicGain, rumbleGain, windGain, musicOn = false, stepTimer = null;
+function ensureAudio(){
+  if(AC) return;
+  AC = new (window.AudioContext||window.webkitAudioContext)();
+  master = AC.createGain(); master.gain.value = 0.8; master.connect(AC.destination);
+  musicGain = AC.createGain(); musicGain.gain.value = 0; musicGain.connect(master);
+  // brown-ish noise for rumble + wind
+  const len = AC.sampleRate*2, buf = AC.createBuffer(1,len,AC.sampleRate), ch = buf.getChannelData(0);
+  let last = 0;
+  for(let i=0;i<len;i++){ const w=(Math.random()*2-1); last=(last+0.02*w)/1.02; ch[i]=last*3; }
+  const noise = AC.createBufferSource(); noise.buffer = buf; noise.loop = true;
+  const lp = AC.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value = 90;
+  rumbleGain = AC.createGain(); rumbleGain.gain.value = 0;
+  noise.connect(lp); lp.connect(rumbleGain); rumbleGain.connect(master);
+  const bp = AC.createBiquadFilter(); bp.type="bandpass"; bp.frequency.value=650; bp.Q.value=0.6;
+  windGain = AC.createGain(); windGain.gain.value = 0;
+  noise.connect(bp); bp.connect(windGain); windGain.connect(master);
+  noise.start();
+}
+function setRumble(r, w){
+  if(!AC) return;
+  rumbleGain.gain.setTargetAtTime(r*0.5, AC.currentTime, 0.4);
+  windGain.gain.setTargetAtTime(w*0.25, AC.currentTime, 0.6);
+}
+const SCALE = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25, 784.00];
+let melodyIdx = 4, step = 0;
+function pluck(freq, when, vol=0.16, dur=0.5){
+  const o = AC.createOscillator(); o.type="triangle"; o.frequency.value = freq;
+  const g = AC.createGain();
+  g.gain.setValueAtTime(0, when);
+  g.gain.linearRampToValueAtTime(vol, when+0.015);
+  g.gain.exponentialRampToValueAtTime(0.0008, when+dur);
+  o.connect(g); g.connect(musicGain);
+  o.start(when); o.stop(when+dur+0.05);
+}
+function pad(freqs, when, dur){
+  for(const f of freqs){
+    const o = AC.createOscillator(); o.type="sine"; o.frequency.value = f;
+    const g = AC.createGain();
+    g.gain.setValueAtTime(0, when);
+    g.gain.linearRampToValueAtTime(0.045, when+1.2);
+    g.gain.linearRampToValueAtTime(0, when+dur);
+    o.connect(g); g.connect(musicGain);
+    o.start(when); o.stop(when+dur+0.1);
+  }
+}
+const CHORDS = [[261.63,329.63,392.0],[220,261.63,329.63],[174.61,261.63,349.23],[196,293.66,392]];
+function musicStep(){
+  const t = AC.currentTime + 0.05;
+  if(step % 16 === 0) pad(CHORDS[(step/16)%4], t, 4.6);
+  if(step % 2 === 0 && Math.random() < 0.85){
+    melodyIdx += [-2,-1,-1,0,1,1,2][Math.random()*7|0];
+    melodyIdx = Math.max(0, Math.min(SCALE.length-1, melodyIdx));
+    pluck(SCALE[melodyIdx], t, 0.13, 0.6);
+    if(Math.random()<0.25) pluck(SCALE[melodyIdx]/2, t, 0.07, 0.9);
+  }
+  step++;
+}
+function toggleMusic(){
+  ensureAudio(); AC.resume();
+  musicOn = !musicOn;
+  musicGain.gain.setTargetAtTime(musicOn?1:0, AC.currentTime, 0.5);
+  if(musicOn && !stepTimer) stepTimer = setInterval(musicStep, 290);
+  if(!musicOn && stepTimer){ clearInterval(stepTimer); stepTimer = null; }
+}
+function blip(freq, vol, dur, type="sine"){
+  if(!AC) return;
+  const t = AC.currentTime;
+  const o = AC.createOscillator(); o.type=type; o.frequency.value=freq;
+  const g = AC.createGain();
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t+dur);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t+dur);
+}
+const playPlop   = ()=>blip(420+Math.random()*120, 0.12, 0.12, "sine");
+const playThud   = ()=>blip(90, 0.10, 0.15, "sine");
+const playShatter= ()=>{ blip(1900,0.06,0.2,"square"); blip(2600,0.04,0.15,"square"); };
+const playBoom   = ()=>{ blip(60,0.3,0.7,"sine"); blip(120,0.15,0.4,"sawtooth"); };
+function playChime(happy){
+  if(!AC) return;
+  const notes = happy ? [523.25,659.25,784,1046.5] : [392,329.63];
+  notes.forEach((f,i)=>setTimeout(()=>blip(f,0.12,0.5,"triangle"), i*140));
+}
+
+/* ---------------- 5c. INPUT & UI ---------------- */
+let currentMat = "wood", erasing = false;
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+let down = null, dragged = false;
+const pointers = new Map();
+let pinchDist = 0, pinchStartRadius = 0;
+
+canvas.addEventListener("contextmenu", e=>e.preventDefault());
+
+function pickCell(e){
+  const r = canvas.getBoundingClientRect();
+  pointer.x = ((e.clientX-r.left)/r.width)*2-1;
+  pointer.y = -((e.clientY-r.top)/r.height)*2+1;
+  raycaster.setFromCamera(pointer, camera);
+  const targets = blocks.filter(b=>b.state==="sleep").map(b=>b.mesh);
+  targets.push(topGrass);
+  const hits = raycaster.intersectObjects(targets);
+  if(!hits.length) return null;
+  const h = hits[0];
+  if(h.object === topGrass){
+    const gx = Math.round(h.point.x + HALF), gz = Math.round(h.point.z + HALF);
+    if(gx<0||gx>=GRID||gz<0||gz>=GRID) return null;
+    return {gx, gy:0, gz, block:null};
+  }
+  const b = blocks.find(bb=>bb.mesh===h.object);
+  const n = h.face.normal.clone().applyQuaternion(h.object.quaternion).round();
+  return {gx:b.gx+n.x, gy:b.gy+n.y, gz:b.gz+n.z, block:b};
+}
+canvas.addEventListener("pointerdown", e=>{
+  pointers.set(e.pointerId, {x: e.clientX, y: e.clientY});
+  if(pointers.size === 1){
+    down = {x:e.clientX, y:e.clientY, theta:orbit.theta, phi:orbit.phi};
+    dragged = false;
+  } else if(pointers.size === 2){
+    const pts = Array.from(pointers.values());
+    pinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    pinchStartRadius = orbit.radius;
+    dragged = true;
+    down = null;
+  }
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener("pointermove", e=>{
+  if(pointers.has(e.pointerId)) pointers.set(e.pointerId, {x: e.clientX, y: e.clientY});
+  
+  if(pointers.size === 2){
+    const pts = Array.from(pointers.values());
+    const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    if(pinchDist > 0) {
+      orbit.radius = Math.max(8, Math.min(120, pinchStartRadius * (pinchDist / dist)));
+    }
+    canvas.classList.add("dragging");
+    ghost.visible = false;
+    return;
+  }
+
+  if(down && pointers.size === 1){
+    const dx = e.clientX-down.x, dy = e.clientY-down.y;
+    if(Math.hypot(dx,dy) > 6) dragged = true;
+    if(dragged){
+      canvas.classList.add("dragging");
+      orbit.theta = down.theta - dx*0.008;
+      orbit.phi = Math.max(0.2, Math.min(1.35, down.phi - dy*0.006));
+      ghost.visible = false;
+      return;
+    }
+  }
+  if(disaster){ ghost.visible=false; return; }
+  const c = pickCell(e);
+  if(!c || erasing || c.gy>=MAXY || cellMap.has(key(c.gx,c.gy,c.gz))){ ghost.visible=false; return; }
+  ghost.visible = true;
+  ghost.material.color.set(erasing?0xf4a6b0:MATS[currentMat].color);
+  ghost.position.set(c.gx-HALF, c.gy+0.5, c.gz-HALF);
+});
+canvas.addEventListener("pointerup", e=>{
+  pointers.delete(e.pointerId);
+  if(pointers.size === 0){
+    canvas.classList.remove("dragging");
+    const wasDrag = dragged; down = null; dragged = false;
+    if(wasDrag || disaster) return;
+    const c = pickCell(e);
+    if(!c) return;
+    ensureAudio(); AC.resume();
+    if(erasing){ if(c.block){ removeBlock(c.block); blip(300,0.08,0.1); } return; }
+    
+    // Attempt place
+    addBlock(c.gx, c.gy, c.gz, currentMat);
+    document.getElementById("hint").style.opacity = 0;
+  }
+});
+canvas.addEventListener("pointercancel", e=>{
+  pointers.delete(e.pointerId);
+  if(pointers.size === 0){ down = null; dragged = false; canvas.classList.remove("dragging"); }
+});
+canvas.addEventListener("wheel", e=>{
+  e.preventDefault();
+  orbit.radius = Math.max(8, Math.min(120, orbit.radius + e.deltaY*0.015));
+},{passive:false});
+
+document.querySelectorAll(".mat[data-mat]").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    currentMat = btn.dataset.mat; erasing = false;
+    document.querySelectorAll(".mat[data-mat]").forEach(b=>b.setAttribute("aria-pressed", b===btn));
+    document.getElementById("eraser").setAttribute("aria-pressed","false");
+  });
+});
+document.getElementById("eraser").addEventListener("click", function(){
+  erasing = !erasing;
+  this.setAttribute("aria-pressed", erasing);
+});
+
+const DISASTERS = ["quake", "wind", "tornado", "meteor"];
+const DISASTER_ICONS = {"quake":"🫨 Earthquake", "wind":"🌬️ Windstorm", "tornado":"🌪️ Tornado", "meteor":"☄️ Meteor"};
+let nextDisType = "quake", nextDisInt = 1.0;
+let frames = 0, lastFps = 0;
+
+const skyColors = {
+  day: new THREE.Color(0x87CEEB),
+  night: new THREE.Color(0x0a0a2a),
+  quake: new THREE.Color(0x4a2a4a),
+  wind: new THREE.Color(0x334455),
+  tornado: new THREE.Color(0x223344),
+  meteor: new THREE.Color(0x5a2a2a)
+};
+let targetSkyColor = skyColors.day;
+let waveTimer = 30;
+
+function rollNextDisaster() {
+  nextDisType = DISASTERS[Math.floor(Math.random() * DISASTERS.length)];
+  nextDisInt = (0.6 + Math.random() * 0.8).toFixed(1);
+  document.getElementById("nextDisasterName").innerHTML = DISASTER_ICONS[nextDisType];
+  document.getElementById("nextDisasterInt").textContent = nextDisInt;
+}
+
+document.getElementById("triggerNextBtn").addEventListener("click", () => {
+  if(disaster) return;
+  waveTimer = 0;
+  startDisaster(nextDisType, parseFloat(nextDisInt));
+});
+
+function setMode(mode) {
+  gameMode = mode;
+  if(gameMode === "survival") {
+    document.body.classList.add("survival-mode");
+    document.getElementById("moneySpan").style.display = "inline";
+    document.getElementById("survivalDisaster").style.display = "flex";
+    money = 100;
+    waveTimer = 30;
+    document.getElementById("statMoney").textContent = money;
+    while(blocks.length) removeBlock(blocks[0]);
+    initVillagers();
+    rollNextDisaster();
+    targetSkyColor = skyColors.day;
+    toast("Welcome to Survival Mode! Build shelters to protect villagers.");
+  } else {
+    document.body.classList.remove("survival-mode");
+    document.getElementById("moneySpan").style.display = "none";
+    document.getElementById("survivalDisaster").style.display = "none";
+    initVillagers();
+    targetSkyColor = skyColors.day;
+    toast("Creative Mode: unlimited blocks!");
+  }
+}
+document.querySelectorAll("#homeScreen .modal-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.getElementById("homeScreen").style.display = "none";
+    setMode(btn.dataset.mode);
+  });
+});
+
+document.getElementById("settingsBtn").addEventListener("click", () => {
+  document.getElementById("setCreativeBtn").style.boxShadow = gameMode === "creative" ? "inset 0 0 0 2px var(--honey)" : "none";
+  document.getElementById("setSurvivalBtn").style.boxShadow = gameMode === "survival" ? "inset 0 0 0 2px var(--honey)" : "none";
+  document.getElementById("setMusicBtn").textContent = "Toggle Music (" + (musicOn ? "On" : "Off") + ")";
+  document.getElementById("settingsScreen").style.display = "grid";
+});
+document.getElementById("closeSettingsBtn").addEventListener("click", () => { document.getElementById("settingsScreen").style.display = "none"; });
+document.getElementById("setCreativeBtn").addEventListener("click", () => { setMode("creative"); document.getElementById("closeSettingsBtn").click(); });
+document.getElementById("setSurvivalBtn").addEventListener("click", () => { setMode("survival"); document.getElementById("closeSettingsBtn").click(); });
+document.getElementById("setMusicBtn").addEventListener("click", () => { toggleMusic(); document.getElementById("setMusicBtn").textContent = "Toggle Music (" + (musicOn ? "On" : "Off") + ")"; });
+
+document.getElementById("undoBtn").addEventListener("click", ()=>{
+  const b = undoStack.pop();
+  if(b && blocks.includes(b) && b.state==="sleep") removeBlock(b);
+});
+document.getElementById("clearBtn").addEventListener("click", ()=>{ if(!disaster) clearAll(); });
+document.getElementById("presetSel").addEventListener("change", function(){
+  if(this.value && !disaster) loadPreset(this.value);
+  this.value = "";
+});
+document.querySelectorAll(".charm[data-dis]").forEach(btn=>{
+  btn.addEventListener("click", ()=>{ ensureAudio(); AC.resume(); startDisaster(btn.dataset.dis); });
+});
+document.getElementById("calmBtn").addEventListener("click", endDisaster);
+let toastTimer = null;
+function toast(html){
+  const t = document.getElementById("toast");
+  t.innerHTML = html; t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.classList.remove("show"), 4200);
+}
+
+/* ---------------- main loop ---------------- */
+function resize(){
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize); resize();
+
+const clock = new THREE.Clock();
+function tick(){
+  requestAnimationFrame(tick);
+  const dt = Math.min(clock.getDelta(), 0.033);
+  const t = clock.elapsedTime;
+  stepDisaster(dt);
+  stepPhysics(dt);
+  stepParticles(dt);
+  stepVillagers(dt, t);
+
+  // Day/Night Cycle and Auto-Waves
+  if (gameMode === "survival" && !disaster) {
+    waveTimer -= dt;
+    if (waveTimer < 0) waveTimer = 0;
+    document.getElementById("waveTimerSpan").textContent = Math.ceil(waveTimer);
+    if (waveTimer <= 5) targetSkyColor = skyColors.night;
+    else targetSkyColor = skyColors.day;
+
+    if (waveTimer === 0) {
+      startDisaster(nextDisType, nextDisInt);
+    }
+  }
+
+  // Sky lerping
+  currentSkyColor.lerp(targetSkyColor, 0.02);
+  scene.background = currentSkyColor;
+  scene.fog.color = currentSkyColor;
+
+  for(const c of clouds){
+    c.position.x += c.userData.speed*dt;
+    if(c.position.x > 22) c.position.x = -22;
+    c.position.y += Math.sin(t*0.6 + c.position.z)*0.002;
+  }
+  // block pop-in easing
+  for(const b of blocks){
+    if(b.mesh.userData.pop){
+      b.mesh.userData.pop -= dt*3.2;
+      const s = 1 - Math.max(0, b.mesh.userData.pop);
+      b.mesh.scale.setScalar(0.2 + 0.8*(1-(1-s)*(1-s)));
+      if(b.mesh.userData.pop<=0){ b.mesh.scale.setScalar(1); b.mesh.userData.pop = 0; }
+    }
+  }
+  island.rotation.y = Math.sin(t*0.15)*0.004;  // the world breathes, very gently
+  applyCamera(shakeAmp);
+  renderer.render(scene, camera);
+  frames++;
+  if(t>lastFps+1){ document.title=`${frames} fps`; frames=0; lastFps=t; }
+}
+
+window.WobbletonAPI = {
+  getMoney: () => money,
+  getVillagers: () => villagers.map(v => ({ gx: v.target.x, gy: 0, gz: v.target.y })), // We don't have gx/gy/gz for villagers natively, wait I need to check how it was returned
+  getVillagers: () => villagers.map(v => ({
+      gx: Math.round(v.x + HALF), 
+      gy: 0, 
+      gz: Math.round(v.z + HALF)
+  })),
+  getNextDisaster: () => ({ type: nextDisType, intensity: nextDisInt }),
+  placeBlock: (gx, gy, gz, mat = "wood") => {
+    const b = addBlock(gx, gy, gz, mat, true); // true for silent (no sound/undo push)
+    if (b) {
+      b.mesh.userData.pop = 0; // Skip animation for tests
+      b.mesh.scale.setScalar(1);
+      // We manually charge money since silent=true skips it in addBlock
+      const cost = MATS[mat].cost;
+      if (gameMode === "survival") {
+         money -= cost;
+         document.getElementById("statMoney").textContent = money;
+      }
+    }
+    return !!b;
+  },
+  triggerWave: () => {
+     if(!disaster) {
+        waveTimer = 0;
+        startDisaster(nextDisType, nextDisInt);
+     }
+  }
+};
+
+tick();
+})();
