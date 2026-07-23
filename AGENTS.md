@@ -2,7 +2,7 @@
 
 > Single source of truth for *how to work on this repo*. Claude and Antigravity both read this (`CLAUDE.md` → `@AGENTS.md`; `GEMINI.md` → pointer). Keep it short. *(Auto-generated 2026-07-11; edit freely — re-runs won't overwrite an existing AGENTS.md.)*
 
-**Brain note (goals, backlog, full context):** `H:\My Drive\Brain2\Projects\wobbletower.md`
+**Brain note (goals, backlog, full context):** [wobbletower.md](file:///H:/My%20Drive/Brain2_backup/Projects/wobbletower.md)
 **GitHub:** https://github.com/p3ji/wobbletower
 **Stack (detected):** Node.js / JavaScript
 
